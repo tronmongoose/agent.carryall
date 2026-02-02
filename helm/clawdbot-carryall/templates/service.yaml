@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.clawdbot.gateway.port }}
+      targetPort: gateway
+      protocol: TCP
+      name: gateway
+    {{- if .Values.carryall.enabled }}
+    - port: {{ .Values.carryall.port }}
+      targetPort: carryall
+      protocol: TCP
+      name: carryall
+    {{- end }}
+  selector:
+    {{- include "clawdbot-carryall.selectorLabels" . | nindent 4 }}

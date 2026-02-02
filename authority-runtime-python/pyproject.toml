@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "authority-runtime"
+version = "0.1.0"
+description = "Cross-platform IAM layer for AI agents - LangChain integration"
+readme = "README.md"
+authors = [
+    { name = "Authority Runtime", email = "hello@authority-runtime.dev" }
+]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "langchain>=1.0.0",
+    "langchain-core>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "langgraph>=0.2.0",
+    "pynacl>=1.5.0",  # Ed25519 signing
+    "openai>=1.10.0,<2.0.0",
+    "anthropic>=0.7.0",
+    "pydantic>=2.0.0",
+    "typer>=0.9.0",  # CLI framework
+    "rich>=13.0.0",  # CLI formatting
+    "aiohttp>=3.9.0",  # HTTP transport for MCP server
+]
+
+[project.scripts]
+carryall = "authority_runtime.cli:app"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tronmongoose/agent.carryall"
+Repository = "https://github.com/tronmongoose/agent.carryall"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true

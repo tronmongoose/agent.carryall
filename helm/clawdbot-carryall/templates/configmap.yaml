@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}-config
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+data:
+  clawdbot.json: |
+    {
+      "agents": {
+        "defaults": {
+          "model": {
+            "primary": {{ .Values.clawdbot.agent.model | quote }}
+          }
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      },
+      "mcpServers": {
+        {{- if .Values.carryall.external.enabled }}
+        "carryall": {
+          "transport": "http",
+          "url": "{{ .Values.carryall.external.url }}/rpc"
+        }
+        {{- else if .Values.carryall.enabled }}
+        "carryall": {
+          "transport": "http",
+          "url": "http://localhost:{{ .Values.carryall.port }}/rpc"
+        }
+        {{- else }}
+        "carryall": {
+          "command": "carryall",
+          "args": ["mcp", "serve"]
+        }
+        {{- end }}
+      }
+    }
+  # Carryall endpoint for skills to use
+  carryall-endpoint.env: |
+    {{- if .Values.carryall.external.enabled }}
+    CARRYALL_URL={{ .Values.carryall.external.url }}
+    {{- else if .Values.carryall.enabled }}
+    CARRYALL_URL=http://localhost:{{ .Values.carryall.port }}
+    {{- end }}

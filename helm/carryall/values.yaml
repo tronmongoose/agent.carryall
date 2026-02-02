@@ -1,0 +1,94 @@
+# Carryall - Authority Runtime for AI Agents
+# Standalone deployment as a shared policy service
+
+replicaCount: 1
+
+image:
+  repository: carryall
+  tag: "0.3.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8765
+
+# HTTP server configuration
+server:
+  host: "0.0.0.0"
+  port: 8765
+
+# API keys for LLM policy compiler (optional)
+secrets:
+  # OpenAI API key for policy compilation
+  openaiApiKey: ""
+  # Anthropic API key (alternative)
+  anthropicApiKey: ""
+
+# Resource limits
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# Container security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Pod annotations
+podAnnotations: {}
+
+# Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# Persistent storage for audit trail and keys
+persistence:
+  enabled: true
+  # Storage class (leave empty for default)
+  storageClass: ""
+  # Access mode
+  accessMode: ReadWriteOnce
+  # Storage size
+  size: 1Gi
+  # Existing PVC to use (if specified, other settings are ignored)
+  existingClaim: ""
