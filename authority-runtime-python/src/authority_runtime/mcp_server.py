@@ -560,11 +560,14 @@ class CarryallMCPServer:
 
         # Get or generate signing key for this agent
         try:
-            private_key = self.key_store.get_private_key(agent_id)
-        except KeyError:
+            signing_key = self.key_store.load_signing_key(agent_id)
+        except FileNotFoundError:
             # Generate new key pair for this agent
-            key_id = self.key_store.generate_key_pair(agent_id)
-            private_key = self.key_store.get_private_key(agent_id)
+            self.key_store.generate_keypair(agent_id)
+            signing_key = self.key_store.load_signing_key(agent_id)
+
+        # Get the private key bytes as hex for create_envelope
+        private_key = bytes(signing_key).hex()
 
         public_key = self.key_store.get_public_key(agent_id)
 
@@ -581,15 +584,21 @@ class CarryallMCPServer:
             max_size_bytes=4096,
         )
 
+        # Create default execution config for carryall
+        from .types import ExecutionConfig
+        default_execution = ExecutionConfig(
+            provider_config={"carryall": {"llm_provider": llm_provider or "openai"}}
+        )
+
         envelope = create_envelope(
             agent_id=agent_id,
-            provider="carryall",
+            provider="custom",  # Use 'custom' as carryall is a custom system
             step_number=1,
             root_policy_id=str(uuid.uuid4()),
             skill=selection.selected_skill,
             authority=narrowed_authority,
             context=narrowed_context,
-            execution=None,
+            execution=default_execution,
             private_key=private_key,
             ttl_seconds=ttl_seconds,
         )
