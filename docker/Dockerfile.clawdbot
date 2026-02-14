@@ -27,8 +27,8 @@ RUN mkdir -p /home/clawdbot/.clawdbot/agents/main/agent \
              /home/clawdbot/workspace \
     && chown -R clawdbot:clawdbot /home/clawdbot
 
-# Copy carryall skill documentation
-COPY docker/skills/carryall /usr/local/lib/node_modules/clawdbot/skills/carryall
+# Install carryall plugin (native agent tools + skill docs)
+COPY extensions/carryall/ /home/clawdbot/.clawdbot/extensions/carryall/
 
 # Install carryall (authority-runtime) in a venv
 COPY authority-runtime-python/ /tmp/authority-runtime-python/

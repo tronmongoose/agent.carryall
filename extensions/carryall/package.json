@@ -1,0 +1,9 @@
+{
+  "name": "carryall",
+  "version": "0.1.0",
+  "description": "Clawdbot plugin for Carryall Authority Runtime",
+  "main": "index.ts",
+  "clawdbot": {
+    "extensions": ["./index.ts"]
+  }
+}

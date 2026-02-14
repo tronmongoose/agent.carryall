@@ -135,7 +135,14 @@ class SlosBackend:
                     self.config = json.load(f)
 
         self.key_store = key_store or AgentKeyStore()
-        self.mcp_command = mcp_command or self.config.get("mcp_command", ["slos-mcp"])
+
+        if mcp_command:
+            self.mcp_command = mcp_command
+        else:
+            cmd = self.config.get("mcp_command", "slos-mcp")
+            args = self.config.get("mcp_args", [])
+            # mcp_command can be a string or list
+            self.mcp_command = ([cmd] if isinstance(cmd, str) else cmd) + args
 
     def _sign_request(self, agent_id: str, arguments: dict) -> dict:
         """
@@ -168,14 +175,18 @@ class SlosBackend:
         Call SLOS MCP server with signed request.
 
         Uses stdio transport - sends JSON-RPC request to stdin, reads response from stdout.
+        SLOS expects MCP protocol: method="tools/call" with tool name in params.name.
         """
         signed_params = self._sign_request(agent_id, params)
 
         request = {
             "jsonrpc": "2.0",
             "id": 1,
-            "method": f"tools/{method}",
-            "params": {"arguments": signed_params},
+            "method": "tools/call",
+            "params": {
+                "name": method,
+                "arguments": signed_params,
+            },
         }
 
         try:
@@ -195,7 +206,16 @@ class SlosBackend:
             if "error" in response:
                 raise RuntimeError(f"MCP error: {response['error']}")
 
-            return response.get("result", {})
+            raw_result = response.get("result", {})
+
+            # Unwrap MCP content envelope format
+            # SLOS returns: {"content": [{"type": "text", "text": "{...}"}]}
+            if "content" in raw_result and isinstance(raw_result["content"], list):
+                for item in raw_result["content"]:
+                    if item.get("type") == "text":
+                        return json.loads(item["text"])
+
+            return raw_result
 
         except subprocess.TimeoutExpired:
             raise RuntimeError("MCP call timed out after 30 seconds")

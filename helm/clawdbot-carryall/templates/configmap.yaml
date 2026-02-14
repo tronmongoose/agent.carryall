@@ -17,23 +17,23 @@ data:
       "gateway": {
         "mode": "local"
       },
-      "mcpServers": {
-        {{- if .Values.carryall.external.enabled }}
-        "carryall": {
-          "transport": "http",
-          "url": "{{ .Values.carryall.external.url }}/rpc"
+      "plugins": {
+        "entries": {
+          "carryall": {
+            "enabled": true,
+            "config": {
+              {{- if .Values.carryall.external.enabled }}
+              "carryallUrl": "{{ .Values.carryall.external.url }}",
+              {{- else if .Values.carryall.enabled }}
+              "carryallUrl": "http://localhost:{{ .Values.carryall.port }}",
+              {{- else }}
+              "carryallUrl": "http://localhost:8765",
+              {{- end }}
+              "defaultLlmProvider": "openai",
+              "defaultTtlSeconds": 300
+            }
+          }
         }
-        {{- else if .Values.carryall.enabled }}
-        "carryall": {
-          "transport": "http",
-          "url": "http://localhost:{{ .Values.carryall.port }}/rpc"
-        }
-        {{- else }}
-        "carryall": {
-          "command": "carryall",
-          "args": ["mcp", "serve"]
-        }
-        {{- end }}
       }
     }
   # Carryall endpoint for skills to use

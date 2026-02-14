@@ -1,0 +1,41 @@
+{
+  "id": "carryall",
+  "name": "Carryall Authority Runtime",
+  "version": "0.1.0",
+  "description": "Cryptographic permission envelopes for AI agents",
+  "skills": ["./skills/carryall"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "carryallUrl": {
+        "type": "string",
+        "description": "Base URL of the Carryall HTTP service"
+      },
+      "defaultLlmProvider": {
+        "type": "string",
+        "enum": ["openai", "anthropic"],
+        "description": "Default LLM provider for policy compilation"
+      },
+      "defaultTtlSeconds": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 86400,
+        "description": "Default TTL for compiled permission envelopes"
+      }
+    },
+    "required": ["carryallUrl"]
+  },
+  "uiHints": {
+    "carryallUrl": {
+      "label": "Carryall URL",
+      "placeholder": "http://localhost:8765"
+    },
+    "defaultLlmProvider": {
+      "label": "LLM Provider"
+    },
+    "defaultTtlSeconds": {
+      "label": "Default TTL (seconds)"
+    }
+  }
+}

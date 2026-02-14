@@ -331,7 +331,7 @@ class CarryallMCPServer:
         check_envelope(envelope, public_key, required_scope)
 
         # Check access via SLOS backend
-        result = self.slos_backend.check_access(envelope, action, resource, mock=True)
+        result = self.slos_backend.check_access(envelope, action, resource, mock=False)
 
         # Log the access check
         audit_entry = create_audit_entry(
@@ -371,7 +371,7 @@ class CarryallMCPServer:
         # List vaults requires vault:*:list or similar scope
         # For now, allow any valid envelope to list vaults
 
-        vaults = self.slos_backend.list_vaults(envelope.agent_id, mock=True)
+        vaults = self.slos_backend.list_vaults(envelope.agent_id, mock=False)
 
         # Log the action
         audit_entry = create_audit_entry(
@@ -402,7 +402,7 @@ class CarryallMCPServer:
         envelope = self._load_envelope(envelope_data)
 
         # Check access first
-        result = self.slos_backend.check_access(envelope, "read", uri, mock=True)
+        result = self.slos_backend.check_access(envelope, "read", uri, mock=False)
 
         if result.decision == Decision.DENY:
             public_key = self._get_public_key(envelope.agent_id)
@@ -440,7 +440,7 @@ class CarryallMCPServer:
             }
 
         # Get metadata
-        metadata = self.slos_backend.get_metadata(uri, envelope.agent_id, mock=True)
+        metadata = self.slos_backend.get_metadata(uri, envelope.agent_id, mock=False)
 
         # Log success
         public_key = self._get_public_key(envelope.agent_id)
