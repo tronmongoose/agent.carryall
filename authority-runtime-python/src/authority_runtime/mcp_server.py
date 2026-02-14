@@ -29,6 +29,7 @@ Configuration (~/.carryall/config.json):
 
 import asyncio
 import json
+import os
 import sys
 import logging
 from datetime import datetime, timezone
@@ -70,7 +71,13 @@ class CarryallMCPServer:
         self.envelope_store = envelope_store or EnvelopeStore(
             str(Path("~/.carryall/authority.db").expanduser())
         )
-        self.slos_backend = slos_backend or SlosBackend(key_store=self.key_store)
+        self.slos_backend = slos_backend or SlosBackend(
+            config_path=os.environ.get(
+                "CARRYALL_SLOS_CONFIG",
+                str(Path("~/Desktop/sovereign-life-os/carryall-integration.json").expanduser()),
+            ),
+            key_store=self.key_store,
+        )
 
         # Cache loaded envelopes
         self._envelope_cache: dict[str, AuthorityEnvelope] = {}

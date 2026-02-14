@@ -128,6 +128,7 @@ class SlosBackend:
             mcp_command: Command to invoke SLOS MCP server (e.g., ["npx", "slos-mcp"])
         """
         self.config: dict = {}
+        self._config_path = config_path
         if config_path:
             config_file = Path(config_path).expanduser()
             if config_file.exists():
@@ -143,6 +144,15 @@ class SlosBackend:
             args = self.config.get("mcp_args", [])
             # mcp_command can be a string or list
             self.mcp_command = ([cmd] if isinstance(cmd, str) else cmd) + args
+
+        # Resolve working directory for subprocess calls
+        # mcp_cwd in config is relative to the config file's directory
+        mcp_cwd = self.config.get("mcp_cwd")
+        if mcp_cwd and config_path:
+            config_dir = Path(config_path).expanduser().parent
+            self.mcp_cwd = str(config_dir) if mcp_cwd == "." else str(config_dir / mcp_cwd)
+        else:
+            self.mcp_cwd = None
 
     def _sign_request(self, agent_id: str, arguments: dict) -> dict:
         """
@@ -196,6 +206,7 @@ class SlosBackend:
                 capture_output=True,
                 text=True,
                 timeout=30,
+                cwd=self.mcp_cwd,
             )
 
             if result.returncode != 0:
