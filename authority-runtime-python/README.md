@@ -2,7 +2,7 @@
 
 **Cryptographic IAM for AI agents** -- scoped, signed, time-limited permissions with a tamper-evident audit trail.
 
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)]()
 
@@ -168,4 +168,4 @@ pytest -v -x      # Verbose, stop on first failure
 
 ## License
 
-MIT
+Business Source License 1.1 - See [LICENSE](LICENSE). Converts to Apache 2.0 after 4 years.

@@ -4,7 +4,7 @@
 
 > Cryptographic policy enforcement for autonomous AI agents. Reduce token costs by ~82% while enforcing least-privilege execution.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
 ---
 
@@ -365,7 +365,7 @@ Carryall is the IAM control plane that makes agent execution auditable, bounded,
 
 ## License
 
-MIT License - See LICENSE file
+Business Source License 1.1 - See [LICENSE](LICENSE) for details. Free for non-production use. Converts to Apache 2.0 after 4 years. Contact licensing@tronmongoose.com for commercial licensing.
 
 ---
 
