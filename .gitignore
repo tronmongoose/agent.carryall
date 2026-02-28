@@ -62,3 +62,17 @@ credentials.json
 
 # Claude
 .claude/
+
+# Private strategy docs (kept locally, not in repo)
+PITCH.md
+DOGFOODING-PLAN.md
+FEEDBACK-STRATEGY.md
+SECURITY-FIXES.md
+LANGCHAIN-INTEGRATION.md
+
+# Dogfood metrics (local only)
+authority-runtime-python/metrics/
+
+# Legacy test artifacts (kept locally)
+tests/USER_FEEDBACK_REPORT.md
+tests/user_scenario.py
