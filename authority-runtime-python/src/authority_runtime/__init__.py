@@ -12,7 +12,13 @@ from .envelope import (
     generate_key_pair,
     verify_signature,
 )
-from .compiler import LLMCompiler, OpenAICompiler, AnthropicCompiler
+try:
+    from .compiler import LLMCompiler, OpenAICompiler, AnthropicCompiler
+except ImportError:
+    LLMCompiler = None
+    OpenAICompiler = None
+    AnthropicCompiler = None
+
 from .types import (
     Skill,
     Authority,
@@ -32,17 +38,26 @@ from .enforce import (
     PermissionDenied,
     EnvelopeExpired,
     InvalidSignature,
+    ConstraintViolation,
+    ApprovalRequired,
     AuditEntry,
     export_audit_trail,
     create_audit_entry,
 )
+from .constraints import check_constraints, ConstraintResult
 from .storage import EnvelopeStore
 from .validation import ValidationError
-from .langgraph import (
-    AuthorityState,
-    create_authority_node,
-    create_authority_graph,
-)
+try:
+    from .langgraph import (
+        AuthorityState,
+        create_authority_node,
+        create_authority_graph,
+    )
+except ImportError:
+    AuthorityState = None
+    create_authority_node = None
+    create_authority_graph = None
+
 from .keys import AgentKeyStore
 from .backends.slos import (
     SlosBackend,
@@ -51,8 +66,9 @@ from .backends.slos import (
     DocumentMetadata,
     parse_slos_uri,
 )
+from .backends.memory import MemoryBackend
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Envelope core
@@ -84,7 +100,12 @@ __all__ = [
     "PermissionDenied",
     "EnvelopeExpired",
     "InvalidSignature",
+    "ConstraintViolation",
+    "ApprovalRequired",
     "ValidationError",
+    # Constraints
+    "check_constraints",
+    "ConstraintResult",
     # Audit trail (enterprise compliance)
     "AuditEntry",
     "export_audit_trail",
@@ -97,8 +118,9 @@ __all__ = [
     "create_authority_graph",
     # Key management
     "AgentKeyStore",
-    # SLOS backend
+    # Backends
     "SlosBackend",
+    "MemoryBackend",
     "Decision",
     "PolicyResult",
     "DocumentMetadata",

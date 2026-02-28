@@ -163,6 +163,82 @@ BUILTIN_ROLES = [
 ]
 
 
+# Edtech roles for FERPA-governed environments
+EDTECH_ROLES = [
+    RoleDefinition(
+        id="student-records-reader",
+        name="Student Records Reader",
+        description="Read access to student enrollment, GPA, and course records",
+        scopes=["vault:student-records:read"],
+        intent_patterns=[
+            r"student.*record", r"enrollment", r"gpa", r"transcript",
+            r"course.*history", r"academic.*record", r"class.*roster",
+            r"student.*info",
+        ],
+        priority=10,
+    ),
+    RoleDefinition(
+        id="financial-aid-reader",
+        name="Financial Aid Reader",
+        description="Read access to student financial aid records (Pell grants, loans, scholarships)",
+        scopes=["vault:financial-aid:read"],
+        intent_patterns=[
+            r"financial.*aid", r"pell.*grant", r"scholarship", r"student.*loan",
+            r"fafsa", r"aid.*package", r"tuition.*assistance",
+        ],
+        priority=10,
+    ),
+    RoleDefinition(
+        id="academic-advisor",
+        name="Academic Advisor",
+        description="Read access to student records and financial aid for advising",
+        scopes=["vault:student-records:read", "vault:financial-aid:read"],
+        intent_patterns=[
+            r"advis", r"academic.*plan", r"degree.*audit", r"course.*recommend",
+            r"student.*meeting", r"advising.*session",
+        ],
+        priority=15,
+    ),
+    RoleDefinition(
+        id="student-health-reader",
+        name="Student Health Reader",
+        description="Read access to student health and disability accommodation records (highly restricted)",
+        scopes=["vault:student-health:read"],
+        intent_patterns=[
+            r"health.*record", r"disability", r"accommodation",
+            r"medical", r"504.*plan", r"iep",
+        ],
+        priority=10,
+        requires_approval=True,
+    ),
+    RoleDefinition(
+        id="ferpa-compliance-analyst",
+        name="FERPA Compliance Analyst",
+        description="Cross-vault read access for FERPA compliance reporting and attestation",
+        scopes=[
+            "vault:student-records:read",
+            "vault:financial-aid:read",
+            "vault:student-health:read",
+            "audit:read",
+        ],
+        intent_patterns=[
+            r"ferpa", r"compliance.*report", r"compliance.*audit",
+            r"access.*attestation", r"negative.*attestation",
+            r"data.*governance", r"privacy.*audit",
+        ],
+        priority=20,
+        requires_approval=True,
+    ),
+]
+
+
+# All role sets for easy loading
+ROLE_SETS = {
+    "builtin": BUILTIN_ROLES,
+    "edtech": EDTECH_ROLES,
+}
+
+
 class RoleStore:
     """
     Persistent storage for role definitions.
@@ -209,6 +285,25 @@ class RoleStore:
 
                 if not existing:
                     self._save_role(conn, role, is_builtin=True)
+
+    def load_role_set(self, name: str) -> list[RoleDefinition]:
+        """Load a named role set (e.g., 'edtech', 'builtin').
+
+        Returns the list of roles that were loaded.
+        """
+        if name not in ROLE_SETS:
+            raise ValueError(f"Unknown role set: {name}. Available: {list(ROLE_SETS.keys())}")
+
+        roles = ROLE_SETS[name]
+        with sqlite3.connect(self.db_path) as conn:
+            for role in roles:
+                existing = conn.execute(
+                    "SELECT id FROM roles WHERE id = ?", (role.id,)
+                ).fetchone()
+                if not existing:
+                    self._save_role(conn, role, is_builtin=True)
+
+        return roles
 
     def _save_role(self, conn: sqlite3.Connection, role: RoleDefinition, is_builtin: bool = False):
         """Save a role to the database."""

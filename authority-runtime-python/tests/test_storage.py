@@ -279,7 +279,7 @@ def test_audit_trail_persistence():
         assert trail[0]["action"] == "read_sensitive_data"
         assert trail[0]["result"] == "success"
         assert trail[0]["signature_valid"] == True
-        assert trail[0]["metadata"]["resource"] == "file-123"
+        assert trail[0]["resource"] == "file-123"
         print(f"✅ Retrieved audit trail: {len(trail)} entries")
         print(f"   - Action: {trail[0]['action']}")
         print(f"   - Result: {trail[0]['result']}")

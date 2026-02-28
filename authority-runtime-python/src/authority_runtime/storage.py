@@ -117,6 +117,7 @@ class EnvelopeStore:
                     signature_valid INTEGER NOT NULL,
                     metadata TEXT,
                     decision_context TEXT,
+                    resource TEXT,
                     FOREIGN KEY (envelope_id) REFERENCES envelopes(envelope_id)
                 )
             """)
@@ -128,7 +129,22 @@ class EnvelopeStore:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_agent_id ON audit_trail(agent_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_root_policy_id ON audit_trail(root_policy_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_result ON audit_trail(result)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_trail(resource)")
 
+            conn.commit()
+
+            # Migration: add resource column to existing databases
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection):
+        """Run schema migrations for existing databases."""
+        cursor = conn.cursor()
+        # Check if resource column exists
+        cursor.execute("PRAGMA table_info(audit_trail)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "resource" not in columns:
+            cursor.execute("ALTER TABLE audit_trail ADD COLUMN resource TEXT")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_trail(resource)")
             conn.commit()
 
     def save_envelope(self, envelope: AuthorityEnvelope) -> None:
@@ -309,8 +325,9 @@ class EnvelopeStore:
             cursor.execute("""
                 INSERT INTO audit_trail (
                     timestamp, action, envelope_id, agent_id, root_policy_id,
-                    result, error, signature_valid, metadata, decision_context
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    result, error, signature_valid, metadata, decision_context,
+                    resource
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 entry.timestamp,
                 entry.action,
@@ -322,6 +339,7 @@ class EnvelopeStore:
                 1 if entry.signature_valid else 0,
                 json.dumps(entry.metadata),
                 decision_context_json,
+                entry.resource,
             ))
 
             conn.commit()
@@ -333,6 +351,7 @@ class EnvelopeStore:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         result: Optional[str] = None,
+        resource_pattern: Optional[str] = None,
         limit: int = 1000
     ) -> List[Dict[str, Any]]:
         """
@@ -344,6 +363,7 @@ class EnvelopeStore:
             start_time: Filter by start timestamp (ISO 8601)
             end_time: Filter by end timestamp (ISO 8601)
             result: Filter by result ('success', 'blocked', 'error')
+            resource_pattern: Filter by resource URI pattern (SQL LIKE, use % as wildcard)
             limit: Maximum number of entries to return
 
         Returns:
@@ -376,6 +396,10 @@ class EnvelopeStore:
                 query += " AND result = ?"
                 params.append(result)
 
+            if resource_pattern:
+                query += " AND resource LIKE ?"
+                params.append(resource_pattern)
+
             query += " ORDER BY timestamp DESC LIMIT ?"
             params.append(limit)
 
@@ -391,6 +415,118 @@ class EnvelopeStore:
                 entries.append(entry)
 
             return entries
+
+    # =========================================================================
+    # Compliance Query Methods
+    # =========================================================================
+
+    def count_access_events(
+        self,
+        agent_id: Optional[str] = None,
+        resource_pattern: Optional[str] = None,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> int:
+        """
+        Count access events matching filters. Used for compliance attestations.
+
+        A count of 0 with agent_id + resource_pattern proves that agent
+        never accessed resources matching that pattern (negative attestation).
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = "SELECT COUNT(*) FROM audit_trail WHERE 1=1"
+            params = []
+
+            if agent_id:
+                query += " AND agent_id = ?"
+                params.append(agent_id)
+            if resource_pattern:
+                query += " AND resource LIKE ?"
+                params.append(resource_pattern)
+            if start_time:
+                query += " AND timestamp >= ?"
+                params.append(start_time)
+            if end_time:
+                query += " AND timestamp <= ?"
+                params.append(end_time)
+
+            cursor.execute(query, tuple(params))
+            return cursor.fetchone()[0]
+
+    def get_distinct_agents_for_resource(
+        self,
+        resource_pattern: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get all agents that accessed resources matching a pattern."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT agent_id, COUNT(*) as access_count,
+                       MIN(timestamp) as first_access, MAX(timestamp) as last_access
+                FROM audit_trail
+                WHERE resource LIKE ?
+            """
+            params: list = [resource_pattern]
+
+            if start_time:
+                query += " AND timestamp >= ?"
+                params.append(start_time)
+            if end_time:
+                query += " AND timestamp <= ?"
+                params.append(end_time)
+
+            query += " GROUP BY agent_id ORDER BY access_count DESC"
+            cursor.execute(query, tuple(params))
+
+            return [
+                {
+                    "agent_id": row[0],
+                    "access_count": row[1],
+                    "first_access": row[2],
+                    "last_access": row[3],
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def get_distinct_resources_for_agent(
+        self,
+        agent_id: str,
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Get all resources an agent has accessed."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = """
+                SELECT resource, COUNT(*) as access_count,
+                       MIN(timestamp) as first_access, MAX(timestamp) as last_access
+                FROM audit_trail
+                WHERE agent_id = ? AND resource IS NOT NULL
+            """
+            params: list = [agent_id]
+
+            if start_time:
+                query += " AND timestamp >= ?"
+                params.append(start_time)
+            if end_time:
+                query += " AND timestamp <= ?"
+                params.append(end_time)
+
+            query += " GROUP BY resource ORDER BY access_count DESC"
+            cursor.execute(query, tuple(params))
+
+            return [
+                {
+                    "resource": row[0],
+                    "access_count": row[1],
+                    "first_access": row[2],
+                    "last_access": row[3],
+                }
+                for row in cursor.fetchall()
+            ]
 
     def get_stats(self) -> Dict[str, Any]:
         """

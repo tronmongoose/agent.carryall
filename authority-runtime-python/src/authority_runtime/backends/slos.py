@@ -433,3 +433,83 @@ class SlosBackend:
             reason=f"No permission for {vault}:{action}",
             metadata={"uri": uri, "required_scope": required_scope},
         )
+
+    def read_document(self, document_id: str, purpose: str, agent_id: str, mock: bool = False) -> dict:
+        """
+        Read document content from SLOS by UUID.
+
+        Args:
+            document_id: Document UUID
+            purpose: Why the agent needs this document (audit trail)
+            agent_id: Agent to authenticate as
+            mock: If True, return simulated data
+
+        Returns:
+            Dict with document content from SLOS
+        """
+        call = self._call_mcp_mock if mock else self._call_mcp
+        return call("read_document", {"id": document_id, "purpose": purpose}, agent_id)
+
+    def write_document(
+        self,
+        domain: str,
+        content: str,
+        metadata: dict,
+        agent_id: str,
+        document_id: str = None,
+        mock: bool = False,
+    ) -> dict:
+        """
+        Write/create a document in a SLOS vault.
+
+        Args:
+            domain: Vault domain to write to (finance, startup, etc.)
+            content: Document content (markdown)
+            metadata: Document metadata (title, subpath, sensitivity, data_type)
+            agent_id: Agent to authenticate as
+            document_id: Optional UUID for updating existing documents
+            mock: If True, return simulated data
+
+        Returns:
+            Dict with created document info from SLOS
+        """
+        params = {
+            "domain": domain,
+            "content": content,
+            "metadata": metadata,
+        }
+        if document_id:
+            params["id"] = document_id
+        call = self._call_mcp_mock if mock else self._call_mcp
+        return call("write_document", params, agent_id)
+
+    def query_documents(
+        self,
+        domain: str,
+        query: str,
+        agent_id: str,
+        include_content: bool = False,
+        limit: int = 10,
+        mock: bool = False,
+    ) -> dict:
+        """
+        Query documents within a domain.
+
+        Args:
+            domain: Vault domain to search (finance, startup, etc.)
+            query: Search query string
+            agent_id: Agent to authenticate as
+            include_content: Whether to include document content in results
+            limit: Maximum number of results
+            mock: If True, return simulated data
+
+        Returns:
+            Dict with matching documents from SLOS
+        """
+        call = self._call_mcp_mock if mock else self._call_mcp
+        return call("query_documents", {
+            "domain": domain,
+            "query": query,
+            "include_content": include_content,
+            "limit": limit,
+        }, agent_id)

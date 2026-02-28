@@ -41,9 +41,16 @@ logger = logging.getLogger(__name__)
 from .keys import AgentKeyStore
 from .storage import EnvelopeStore
 from .types import AuthorityEnvelope, Skill, Authority, Context
-from .enforce import check_envelope, create_audit_entry, PermissionDenied, InvalidSignature, EnvelopeExpired
+from .enforce import check_envelope, create_audit_entry, PermissionDenied, InvalidSignature, EnvelopeExpired, ConstraintViolation, ApprovalRequired
 from .backends.slos import SlosBackend, Decision
-from .compiler import OpenAICompiler, AnthropicCompiler, compile_policy
+from .backends.memory import MemoryBackend
+
+try:
+    from .compiler import OpenAICompiler, AnthropicCompiler, compile_policy
+except ImportError:
+    OpenAICompiler = None
+    AnthropicCompiler = None
+    compile_policy = None
 
 
 class CarryallMCPServer:
@@ -66,18 +73,35 @@ class CarryallMCPServer:
         key_store: Optional[AgentKeyStore] = None,
         envelope_store: Optional[EnvelopeStore] = None,
         slos_backend: Optional[SlosBackend] = None,
+        backend: Optional[Any] = None,
     ):
         self.key_store = key_store or AgentKeyStore()
         self.envelope_store = envelope_store or EnvelopeStore(
             str(Path("~/.carryall/authority.db").expanduser())
         )
-        self.slos_backend = slos_backend or SlosBackend(
-            config_path=os.environ.get(
-                "CARRYALL_SLOS_CONFIG",
-                str(Path("~/Desktop/sovereign-life-os/carryall-integration.json").expanduser()),
-            ),
-            key_store=self.key_store,
-        )
+
+        # Backend resolution: explicit backend > explicit slos_backend > env config > MemoryBackend
+        if backend is not None:
+            self.slos_backend = backend
+        elif slos_backend is not None:
+            self.slos_backend = slos_backend
+        elif os.environ.get("CARRYALL_SLOS_CONFIG"):
+            self.slos_backend = SlosBackend(
+                config_path=os.environ["CARRYALL_SLOS_CONFIG"],
+                key_store=self.key_store,
+            )
+        else:
+            # Check if the default SLOS config exists
+            default_config = Path("~/Desktop/sovereign-life-os/carryall-integration.json").expanduser()
+            if default_config.exists():
+                self.slos_backend = SlosBackend(
+                    config_path=str(default_config),
+                    key_store=self.key_store,
+                )
+            else:
+                # Standalone mode — no external backend required
+                logger.info("No SLOS config found. Starting with in-memory backend.")
+                self.slos_backend = MemoryBackend()
 
         # Cache loaded envelopes
         self._envelope_cache: dict[str, AuthorityEnvelope] = {}
@@ -297,6 +321,100 @@ class CarryallMCPServer:
                         "required": ["agent_id", "intent", "available_scopes", "available_resources"],
                     },
                 },
+                {
+                    "name": "carryall_read_document",
+                    "description": "Read document content from a SLOS vault. Requires envelope with appropriate vault read scope. Accepts slos:// URI and automatically resolves to document UUID.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "envelope": {
+                                "type": "object",
+                                "description": "The AuthorityEnvelope for authentication",
+                            },
+                            "uri": {
+                                "type": "string",
+                                "description": "Document URI (e.g., slos://vaults/finance/budgets/q1-2026-budget.md)",
+                            },
+                            "purpose": {
+                                "type": "string",
+                                "description": "Why the agent needs this document (recorded in audit trail)",
+                            },
+                        },
+                        "required": ["envelope", "uri", "purpose"],
+                    },
+                },
+                {
+                    "name": "carryall_write_document",
+                    "description": "Create or update a document in a SLOS vault. Requires envelope with vault write scope for the target domain.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "envelope": {
+                                "type": "object",
+                                "description": "The AuthorityEnvelope for authentication",
+                            },
+                            "domain": {
+                                "type": "string",
+                                "description": "Vault domain to write to (e.g., finance, startup, personal)",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "Document content (markdown)",
+                            },
+                            "title": {
+                                "type": "string",
+                                "description": "Document title",
+                            },
+                            "subpath": {
+                                "type": "string",
+                                "description": "Subdirectory within the vault (e.g., 'journal', 'budgets')",
+                            },
+                            "purpose": {
+                                "type": "string",
+                                "description": "Why this document is being created (recorded in audit trail)",
+                            },
+                            "sensitivity": {
+                                "type": "string",
+                                "description": "Sensitivity level: internal, confidential, or restricted (default: internal)",
+                            },
+                            "data_type": {
+                                "type": "string",
+                                "description": "Document type: note, profile, budget, project, etc. (default: note)",
+                            },
+                        },
+                        "required": ["envelope", "domain", "content", "title", "purpose"],
+                    },
+                },
+                {
+                    "name": "carryall_query_documents",
+                    "description": "Search documents within a SLOS vault domain. Requires envelope with vault read scope for the target domain.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "envelope": {
+                                "type": "object",
+                                "description": "The AuthorityEnvelope for authentication",
+                            },
+                            "domain": {
+                                "type": "string",
+                                "description": "Vault domain to search (e.g., finance, startup, health, personal)",
+                            },
+                            "query": {
+                                "type": "string",
+                                "description": "Search query string",
+                            },
+                            "include_content": {
+                                "type": "boolean",
+                                "description": "Include document content in results (default false)",
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum results to return (default 10)",
+                            },
+                        },
+                        "required": ["envelope", "domain", "query"],
+                    },
+                },
             ]
         }
 
@@ -315,6 +433,12 @@ class CarryallMCPServer:
             return await self._tool_audit_log(arguments)
         elif tool_name == "carryall_compile_policy":
             return await self._tool_compile_policy(arguments)
+        elif tool_name == "carryall_read_document":
+            return await self._tool_read_document(arguments)
+        elif tool_name == "carryall_write_document":
+            return await self._tool_write_document(arguments)
+        elif tool_name == "carryall_query_documents":
+            return await self._tool_query_documents(arguments)
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -647,6 +771,218 @@ class CarryallMCPServer:
                             "cost_usd": metrics.total_cost_usd if metrics else None,
                             "latency_ms": metrics.latency_ms if metrics else None,
                         } if metrics else None,
+                    }, default=str),
+                }
+            ]
+        }
+
+    async def _tool_read_document(self, arguments: dict) -> dict:
+        """
+        Read document content from SLOS with envelope enforcement.
+
+        Accepts an slos:// URI, resolves it to a UUID via get_metadata,
+        checks the envelope has the required vault:read scope,
+        then reads the actual content.
+        """
+        envelope_data = arguments.get("envelope")
+        uri = arguments.get("uri")
+        purpose = arguments.get("purpose", "read")
+
+        if not envelope_data:
+            raise PermissionDenied("Missing envelope")
+        if not uri:
+            raise ValueError("Missing uri parameter")
+
+        envelope = self._load_envelope(envelope_data)
+        public_key = self._get_public_key(envelope.agent_id)
+
+        # Check envelope has required scope for this vault (+ constraints)
+        required_scope = self._derive_scope_from_resource(uri, "read")
+        check_envelope(
+            envelope, public_key, required_scope,
+            action="read", resource=uri, context={"purpose": purpose},
+        )
+
+        # Resolve URI to document UUID via get_metadata
+        try:
+            metadata = self.slos_backend.get_metadata(uri, envelope.agent_id, mock=False)
+        except Exception as e:
+            raise ValueError(f"Failed to resolve URI '{uri}': {e}")
+
+        if not metadata.id:
+            raise ValueError(f"Could not resolve URI '{uri}' to a document ID")
+
+        # Check document-level access policy
+        result = self.slos_backend.check_access(envelope, "read", uri, mock=False)
+        if result.decision == Decision.DENY:
+            audit_entry = create_audit_entry(
+                action="read_document",
+                envelope=envelope,
+                public_key=public_key,
+                result="deny",
+                resource=uri,
+                reason=result.reason,
+            )
+            self.envelope_store.save_audit_entry(audit_entry)
+            raise PermissionDenied(result.reason)
+
+        # Read the actual content
+        content = self.slos_backend.read_document(metadata.id, purpose, envelope.agent_id, mock=False)
+
+        # Audit the successful read
+        audit_entry = create_audit_entry(
+            action="read_document",
+            envelope=envelope,
+            public_key=public_key,
+            result="success",
+            resource=uri,
+            reason=f"Read document {metadata.id} with purpose: {purpose}",
+        )
+        self.envelope_store.save_audit_entry(audit_entry)
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({
+                        "uri": uri,
+                        "id": metadata.id,
+                        "domain": metadata.domain,
+                        "sensitivity": metadata.sensitivity,
+                        "document": content,
+                    }, default=str),
+                }
+            ]
+        }
+
+    async def _tool_write_document(self, arguments: dict) -> dict:
+        """
+        Create or update a document in SLOS with envelope enforcement.
+
+        Checks the envelope has vault:{domain}:write scope before writing.
+        """
+        envelope_data = arguments.get("envelope")
+        domain = arguments.get("domain")
+        content = arguments.get("content")
+        title = arguments.get("title", "Untitled")
+        subpath = arguments.get("subpath", "")
+        purpose = arguments.get("purpose", "write")
+        sensitivity = arguments.get("sensitivity", "internal")
+        data_type = arguments.get("data_type", "note")
+
+        if not envelope_data:
+            raise PermissionDenied("Missing envelope")
+        if not domain:
+            raise ValueError("Missing domain parameter")
+        if not content:
+            raise ValueError("Missing content parameter")
+
+        envelope = self._load_envelope(envelope_data)
+        public_key = self._get_public_key(envelope.agent_id)
+
+        # Check envelope has WRITE scope for this domain (+ constraints)
+        required_scope = f"vault:{domain}:write"
+        resource_uri = f"slos://vaults/{domain}/{subpath}" if subpath else f"slos://vaults/{domain}/"
+        check_envelope(
+            envelope, public_key, required_scope,
+            action="write", resource=resource_uri, context={"purpose": purpose},
+        )
+
+        # Build metadata for SLOS
+        metadata = {
+            "title": title,
+            "subpath": subpath,
+            "sensitivity": sensitivity,
+            "data_type": data_type,
+        }
+
+        # Write via backend
+        result = self.slos_backend.write_document(
+            domain=domain,
+            content=content,
+            metadata=metadata,
+            agent_id=envelope.agent_id,
+        )
+
+        # Audit the write
+        audit_entry = create_audit_entry(
+            action="write_document",
+            envelope=envelope,
+            public_key=public_key,
+            result="success",
+            resource=f"slos://vaults/{domain}/{subpath}",
+            reason=f"Created document '{title}' with purpose: {purpose}",
+        )
+        self.envelope_store.save_audit_entry(audit_entry)
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({
+                        "domain": domain,
+                        "title": title,
+                        "result": result,
+                    }, default=str),
+                }
+            ]
+        }
+
+    async def _tool_query_documents(self, arguments: dict) -> dict:
+        """
+        Search documents within a SLOS vault domain with envelope enforcement.
+
+        Checks the envelope has vault:{domain}:read scope before querying.
+        """
+        envelope_data = arguments.get("envelope")
+        domain = arguments.get("domain")
+        query = arguments.get("query")
+        include_content = arguments.get("include_content", False)
+        limit = arguments.get("limit", 10)
+
+        if not envelope_data:
+            raise PermissionDenied("Missing envelope")
+        if not domain:
+            raise ValueError("Missing domain parameter")
+        if not query:
+            raise ValueError("Missing query parameter")
+
+        envelope = self._load_envelope(envelope_data)
+        public_key = self._get_public_key(envelope.agent_id)
+
+        # Check envelope has read scope for this domain
+        required_scope = f"vault:{domain}:read"
+        check_envelope(envelope, public_key, required_scope)
+
+        # Query SLOS
+        results = self.slos_backend.query_documents(
+            domain=domain,
+            query=query,
+            agent_id=envelope.agent_id,
+            include_content=include_content,
+            limit=limit,
+            mock=False,
+        )
+
+        # Audit the query
+        audit_entry = create_audit_entry(
+            action="query_documents",
+            envelope=envelope,
+            public_key=public_key,
+            result="success",
+            resource=f"slos://vaults/{domain}",
+            reason=f"Query: '{query}' (limit={limit}, include_content={include_content})",
+        )
+        self.envelope_store.save_audit_entry(audit_entry)
+
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps({
+                        "domain": domain,
+                        "query": query,
+                        "results": results,
                     }, default=str),
                 }
             ]

@@ -34,6 +34,8 @@ from rich.table import Table
 from .keys import AgentKeyStore
 from .envelope import create_simple_envelope, generate_key_pair, verify_signature
 from .storage import EnvelopeStore
+from .compliance import ComplianceReport
+from .policy import PolicyEngine, PolicyValidationError
 from .types import AuthorityEnvelope
 from .backends.slos import SlosBackend, Decision, parse_slos_uri
 
@@ -51,12 +53,16 @@ keys_app = typer.Typer(help="Manage agent Ed25519 keys")
 credentials_app = typer.Typer(help="Manage authority envelopes/credentials")
 backends_app = typer.Typer(help="Manage backend adapters")
 audit_app = typer.Typer(help="Query and verify audit logs")
+compliance_app = typer.Typer(help="FERPA/compliance reporting and attestation")
+policy_app = typer.Typer(help="YAML policy management")
 mcp_app = typer.Typer(help="MCP server for Clawdbot integration")
 
 app.add_typer(keys_app, name="keys")
 app.add_typer(credentials_app, name="credentials")
 app.add_typer(backends_app, name="backends")
 app.add_typer(audit_app, name="audit")
+app.add_typer(compliance_app, name="compliance")
+app.add_typer(policy_app, name="policy")
 app.add_typer(mcp_app, name="mcp")
 
 
@@ -716,6 +722,416 @@ def audit_export(
 
     console.print(f"[green]✓ Exported {len(entries)} audit entries to {output_path}[/green]")
     console.print(f"  Total size: {output_path.stat().st_size / 1024:.1f} KB")
+
+
+# =============================================================================
+# Compliance commands
+# =============================================================================
+
+
+@compliance_app.command("attest")
+def compliance_attest(
+    agent_id: str = typer.Option(..., "--agent", "-a", help="Agent ID to attest"),
+    resource: str = typer.Option(..., "--resource", "-r", help="Resource pattern (SQL LIKE, use % wildcard)"),
+    since: str = typer.Option("90d", "--since", "-s", help="Time window (e.g., 30d, 90d, 1y)"),
+    output_format: str = typer.Option("table", "--format", "-f", help="Output format: table, json"),
+):
+    """Prove an agent NEVER accessed a resource (negative attestation).
+
+    The FERPA killer feature: cryptographic proof that an agent did not
+    access specific records during a time period.
+
+    Examples:
+
+        carryall compliance attest --agent financial-aid-agent --resource "slos://vaults/student-health/%"
+
+        carryall compliance attest --agent academic-advisor --resource "slos://vaults/student-health/%" --since 90d
+    """
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        console.print("No audit database found.")
+        raise typer.Exit(1)
+
+    store = EnvelopeStore(str(db_path))
+    report = ComplianceReport(store)
+
+    ttl_seconds = parse_ttl(since)
+    start_time = datetime.now(timezone.utc).timestamp() - ttl_seconds
+
+    result = report.negative_attestation(
+        agent_id=agent_id,
+        resource_pattern=resource,
+        start_time=start_time,
+    )
+
+    if output_format == "json":
+        console.print(json.dumps(result, indent=2))
+        return
+
+    if result["confirmed"]:
+        console.print(f"\n[green bold]CONFIRMED: {agent_id} did NOT access {resource}[/green bold]")
+    else:
+        console.print(f"\n[red bold]FAILED: {agent_id} accessed {resource} ({result['count']} events)[/red bold]")
+
+    console.print(f"\n  Agent:    {result['agent_id']}")
+    console.print(f"  Resource: {result['resource_pattern']}")
+    console.print(f"  Window:   last {since}")
+    console.print(f"  Events:   {result['count']}")
+    console.print(f"  Hash:     {result['attestation_hash']}")
+
+
+@compliance_app.command("agent-report")
+def compliance_agent_report(
+    agent_id: str = typer.Option(..., "--agent", "-a", help="Agent ID"),
+    resource: Optional[str] = typer.Option(None, "--resource", "-r", help="Resource pattern filter"),
+    since: str = typer.Option("30d", "--since", "-s", help="Time window"),
+    output_format: str = typer.Option("table", "--format", "-f", help="Output format: table, json, csv"),
+    output: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path"),
+):
+    """Show all access events for an agent.
+
+    Examples:
+
+        carryall compliance agent-report --agent academic-advisor --since 30d
+
+        carryall compliance agent-report --agent financial-aid-agent --resource "slos://vaults/student-health/%" --format csv -o report.csv
+    """
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        console.print("No audit database found.")
+        raise typer.Exit(1)
+
+    store = EnvelopeStore(str(db_path))
+    report = ComplianceReport(store)
+
+    ttl_seconds = parse_ttl(since)
+    start_time = datetime.now(timezone.utc).timestamp() - ttl_seconds
+
+    result = report.agent_access_report(
+        agent_id=agent_id,
+        resource_pattern=resource,
+        start_time=start_time,
+    )
+
+    if output_format == "json":
+        if output:
+            report.export_json(result, output)
+            console.print(f"[green]Exported to {output}[/green]")
+        else:
+            console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    if output_format == "csv":
+        entries = store.get_audit_trail(
+            agent_id=agent_id,
+            resource_pattern=resource,
+        )
+        if output:
+            report.export_csv(entries, output)
+            console.print(f"[green]Exported {len(entries)} entries to {output}[/green]")
+        else:
+            console.print(report.export_csv_string(entries))
+        return
+
+    # Table output
+    summary = result["summary"]
+    console.print(f"\n[bold]Agent Access Report: {agent_id}[/bold]")
+    console.print(f"  Window: last {since}")
+
+    table = Table()
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Total Events", str(summary["total_events"]))
+    table.add_row("Successful", str(summary["successful"]))
+    table.add_row("Blocked", str(summary["blocked"]))
+    table.add_row("Distinct Resources", str(summary["distinct_resources"]))
+    console.print(table)
+
+
+@compliance_app.command("resource-report")
+def compliance_resource_report(
+    resource: str = typer.Option(..., "--resource", "-r", help="Resource pattern (SQL LIKE)"),
+    since: str = typer.Option("30d", "--since", "-s", help="Time window"),
+    output_format: str = typer.Option("table", "--format", "-f", help="Output format: table, json"),
+):
+    """Show all agents that accessed a resource.
+
+    Examples:
+
+        carryall compliance resource-report --resource "slos://vaults/student-records/%"
+
+        carryall compliance resource-report --resource "slos://vaults/student-health/%" --format json
+    """
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        console.print("No audit database found.")
+        raise typer.Exit(1)
+
+    store = EnvelopeStore(str(db_path))
+    report = ComplianceReport(store)
+
+    ttl_seconds = parse_ttl(since)
+    start_time = datetime.now(timezone.utc).timestamp() - ttl_seconds
+
+    result = report.resource_access_report(
+        resource_pattern=resource,
+        start_time=start_time,
+    )
+
+    if output_format == "json":
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    summary = result["summary"]
+    console.print(f"\n[bold]Resource Access Report: {resource}[/bold]")
+    console.print(f"  Window: last {since}")
+
+    table = Table()
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Total Events", str(summary["total_events"]))
+    table.add_row("Distinct Agents", str(summary["distinct_agents"]))
+    console.print(table)
+
+    if result.get("agents"):
+        agent_table = Table(title="Agents")
+        agent_table.add_column("Agent ID", style="cyan")
+        agent_table.add_column("Access Count")
+        agent_table.add_column("First Access")
+        agent_table.add_column("Last Access")
+        for agent in result["agents"]:
+            agent_table.add_row(
+                agent["agent_id"],
+                str(agent["access_count"]),
+                agent.get("first_access", "")[:19],
+                agent.get("last_access", "")[:19],
+            )
+        console.print(agent_table)
+
+
+@compliance_app.command("report")
+def compliance_report(
+    since: str = typer.Option("90d", "--since", "-s", help="Time window (e.g., 30d, 90d, 1y)"),
+    output: str = typer.Option("report.html", "--output", "-o", help="Output file path"),
+    output_format: str = typer.Option("html", "--format", "-f", help="Output format: html, json"),
+    policy: Optional[str] = typer.Option(None, "--policy", "-p", help="Path to YAML policy file (adds data classifications)"),
+    title: str = typer.Option("FERPA Compliance Report", "--title", "-t", help="Report title"),
+):
+    """Generate a comprehensive compliance report.
+
+    Produces a self-contained HTML document that can be emailed to legal.
+    Includes executive summary, per-agent breakdown, negative attestation
+    matrix, and data classification details.
+
+    Examples:
+
+        carryall compliance report --since 90d --output ferpa-q1.html
+
+        carryall compliance report --since 30d --policy policy.yaml --output report.html
+
+        carryall compliance report --format json --output report.json
+    """
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        console.print("No audit database found.")
+        raise typer.Exit(1)
+
+    store = EnvelopeStore(str(db_path))
+    report_gen = ComplianceReport(store)
+
+    ttl_seconds = parse_ttl(since)
+    start_time = datetime.now(timezone.utc).timestamp() - ttl_seconds
+
+    # Load policy if provided
+    policy_summary = None
+    if policy:
+        try:
+            engine = PolicyEngine.load(policy)
+            policy_summary = engine.summary()
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] Could not load policy: {e}")
+
+    full_report = report_gen.generate_full_report(
+        start_time=start_time,
+        policy_summary=policy_summary,
+        title=title,
+    )
+
+    if output_format == "json":
+        report_gen.export_json(full_report, output)
+        console.print(f"[green]JSON report saved to {output}[/green]")
+        return
+
+    # HTML output
+    html = report_gen.render_html(full_report)
+    with open(output, "w") as f:
+        f.write(html)
+
+    console.print(f"[green]HTML compliance report saved to {output}[/green]")
+    exec_summary = full_report["executive_summary"]
+    console.print(f"  Agents: {exec_summary['total_agents']}, Events: {exec_summary['total_events']}, "
+                  f"Blocked: {exec_summary['blocked']}, Attestations: {len(full_report['attestations'])}")
+
+
+@compliance_app.command("summary")
+def compliance_summary(
+    since: str = typer.Option("30d", "--since", "-s", help="Time window"),
+    output_format: str = typer.Option("table", "--format", "-f", help="Output format: table, json"),
+):
+    """Show compliance summary across all agents.
+
+    Examples:
+
+        carryall compliance summary --since 30d
+
+        carryall compliance summary --format json
+    """
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        console.print("No audit database found.")
+        raise typer.Exit(1)
+
+    store = EnvelopeStore(str(db_path))
+    report = ComplianceReport(store)
+
+    result = report.scope_usage_report()
+
+    if output_format == "json":
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    summary = result["summary"]
+    console.print(f"\n[bold]Compliance Summary[/bold]")
+
+    table = Table()
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Total Events", str(summary["total_events"]))
+    table.add_row("Distinct Agents", str(summary["distinct_agents"]))
+    table.add_row("Successful", str(summary.get("successful", "N/A")))
+    table.add_row("Blocked", str(summary.get("blocked", "N/A")))
+    console.print(table)
+
+    if result.get("agents"):
+        agent_table = Table(title="Agent Activity")
+        agent_table.add_column("Agent ID", style="cyan")
+        agent_table.add_column("Events")
+        agent_table.add_column("Successful")
+        agent_table.add_column("Blocked")
+        for agent in result["agents"]:
+            agent_table.add_row(
+                agent["agent_id"],
+                str(agent["total_events"]),
+                str(agent.get("successful", 0)),
+                str(agent.get("blocked", 0)),
+            )
+        console.print(agent_table)
+
+
+# =============================================================================
+# Policy commands
+# =============================================================================
+
+
+@policy_app.command("validate")
+def policy_validate(
+    path: str = typer.Argument(..., help="Path to YAML policy file"),
+):
+    """Validate a YAML policy file and show a summary.
+
+    Examples:
+
+        carryall policy validate examples/edtech-policy.yaml
+    """
+    try:
+        engine = PolicyEngine.load(path)
+    except PolicyValidationError as e:
+        console.print(f"[red]INVALID:[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]Error loading policy:[/red] {e}")
+        raise typer.Exit(1)
+
+    s = engine.summary()
+    console.print(f"[green]Valid.[/green] {s['agent_count']} agents, "
+                  f"{s['classification_count']} data classifications, "
+                  f"{', '.join(s['compliance_frameworks']) or 'no'} compliance framework(s)")
+    console.print(f"  Organization: {s['organization']}")
+    console.print(f"  Version:      {s['version']}")
+
+
+@policy_app.command("show")
+def policy_show(
+    path: str = typer.Argument(..., help="Path to YAML policy file"),
+    output_format: str = typer.Option("table", "--format", "-f", help="Output format: table, json"),
+):
+    """Show policy details in a rich table.
+
+    Examples:
+
+        carryall policy show examples/edtech-policy.yaml
+
+        carryall policy show examples/edtech-policy.yaml --format json
+    """
+    try:
+        engine = PolicyEngine.load(path)
+    except PolicyValidationError as e:
+        console.print(f"[red]INVALID:[/red] {e}")
+        raise typer.Exit(1)
+
+    if output_format == "json":
+        console.print(json.dumps(engine.summary(), indent=2))
+        return
+
+    s = engine.summary()
+
+    # Header
+    console.print(f"\n[bold]{s['organization']}[/bold] — Policy v{s['version']}")
+    if s['compliance_frameworks']:
+        console.print(f"  Frameworks: {', '.join(s['compliance_frameworks'])}")
+
+    # Agents table
+    agent_table = Table(title="Agent Policies")
+    agent_table.add_column("Agent ID", style="cyan")
+    agent_table.add_column("Scopes")
+    agent_table.add_column("Constraints")
+    agent_table.add_column("Denied Resources", style="red")
+
+    for agent in s["agents"]:
+        constraints_str = ", ".join(
+            f"{k}={v}" for k, v in agent["constraints"].items()
+        ) or "none"
+        denied_str = "\n".join(agent["denied_resources"]) or "none"
+        scopes_str = "\n".join(agent["scopes"])
+        agent_table.add_row(agent["id"], scopes_str, constraints_str, denied_str)
+
+    console.print(agent_table)
+
+    # Data classifications table
+    if s["data_classifications"]:
+        dc_table = Table(title="Data Classifications")
+        dc_table.add_column("Domain", style="cyan")
+        dc_table.add_column("Sensitivity")
+        dc_table.add_column("PII Fields", style="yellow")
+        dc_table.add_column("Retention")
+
+        for dc in s["data_classifications"]:
+            sensitivity_style = {
+                "internal": "green",
+                "confidential": "yellow",
+                "restricted": "red",
+            }.get(dc["sensitivity"], "white")
+
+            retention = f"{dc['retention_days']} days" if dc["retention_days"] else "not set"
+
+            dc_table.add_row(
+                dc["domain"],
+                f"[{sensitivity_style}]{dc['sensitivity']}[/{sensitivity_style}]",
+                ", ".join(dc["pii_fields"]) or "none",
+                retention,
+            )
+
+        console.print(dc_table)
 
 
 # =============================================================================

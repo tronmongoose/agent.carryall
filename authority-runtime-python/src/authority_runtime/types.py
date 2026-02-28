@@ -19,7 +19,11 @@ class Authority(BaseModel):
     )
     constraints: Dict[str, Any] = Field(
         default_factory=dict,
-        description="Additional constraints (NOTE: Not yet enforced in current version)",
+        description=(
+            "Enforced constraints on envelope usage. Supported keys: "
+            "require_purpose (bool), denied_resources (list[str] with glob patterns), "
+            "max_records_per_request (int), write_requires_approval (bool)"
+        ),
     )
 
     @field_validator('scopes')

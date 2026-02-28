@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from functools import wraps
 
+from .constraints import check_constraints, ConstraintResult
 from .envelope import verify_signature
 from .types import AuthorityEnvelope
 
@@ -28,18 +29,62 @@ class InvalidSignature(Exception):
     pass
 
 
+def _scope_matches(granted: str, required: str) -> bool:
+    """
+    Check if a granted scope pattern matches a required scope.
+
+    Supports per-segment wildcard matching:
+      - "vault:finance:read" matches "vault:finance:read" (exact)
+      - "vault:*:read" matches "vault:finance:read" (segment wildcard)
+      - "vault:finance:*" matches "vault:finance:read" and "vault:finance:write"
+      - "*:*:*" matches any 3-segment scope
+
+    Segments must match in count — "vault:*" does NOT match "vault:finance:read".
+    """
+    g_parts = granted.split(":")
+    r_parts = required.split(":")
+    if len(g_parts) != len(r_parts):
+        return False
+    return all(g == "*" or g == r for g, r in zip(g_parts, r_parts))
+
+
+class ConstraintViolation(Exception):
+    """Raised when an envelope's constraints are violated."""
+    pass
+
+
+class ApprovalRequired(Exception):
+    """Raised when an action requires human approval per envelope constraints."""
+    pass
+
+
 def check_envelope(
     envelope: AuthorityEnvelope,
     public_key: str,
     required_scope: str,
+    action: Optional[str] = None,
+    resource: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Validate an envelope before allowing an action.
+
+    Checks signature, expiration, scope (with wildcards), and constraints.
+
+    Args:
+        envelope: The authority envelope to validate
+        public_key: Agent's Ed25519 public key for signature verification
+        required_scope: Scope string required for this action
+        action: Action being performed (e.g., "read", "write") — for constraint checking
+        resource: Resource URI being accessed — for constraint checking
+        context: Additional context dict — for constraint checking
 
     Raises:
         InvalidSignature: If the envelope signature doesn't verify
         EnvelopeExpired: If the envelope TTL has passed
         PermissionDenied: If the required scope isn't in the envelope
+        ConstraintViolation: If envelope constraints are violated
+        ApprovalRequired: If action requires human approval per constraints
     """
     # 1. Verify signature - tamper detection
     if not verify_signature(envelope, public_key):
@@ -57,12 +102,35 @@ def check_envelope(
             f"Current time: {now.isoformat()}"
         )
 
-    # 3. Check scope
-    if required_scope not in envelope.authority.scopes:
+    # 3. Check scope (with wildcard support)
+    if not any(_scope_matches(s, required_scope) for s in envelope.authority.scopes):
         raise PermissionDenied(
             f"Action requires scope '{required_scope}' but envelope only grants: "
             f"{envelope.authority.scopes}"
         )
+
+    # 4. Check constraints (if any)
+    if envelope.authority.constraints:
+        result = check_constraints(
+            constraints=envelope.authority.constraints,
+            action=action or _infer_action(required_scope),
+            resource=resource,
+            context=context,
+        )
+        if result.require_approval:
+            raise ApprovalRequired(
+                f"Action requires human approval: {'; '.join(result.warnings)}"
+            )
+        if not result.allowed:
+            raise ConstraintViolation(
+                f"Constraint violation: {'; '.join(result.violated)}"
+            )
+
+
+def _infer_action(scope: str) -> str:
+    """Infer action from scope string (last segment). Fallback for when action not explicitly passed."""
+    parts = scope.split(":")
+    return parts[-1] if parts else "unknown"
 
 
 def check_context_field(envelope: AuthorityEnvelope, field: str) -> None:
@@ -317,6 +385,7 @@ class AuditEntry:
         result: str = "success",
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        resource: Optional[str] = None,
     ):
         self.timestamp = datetime.now(timezone.utc).isoformat()
         self.action = action
@@ -325,6 +394,7 @@ class AuditEntry:
         self.result = result
         self.error = error
         self.metadata = metadata or {}
+        self.resource = resource
 
         # Verify signature at audit time
         self.signature_valid = verify_signature(envelope, public_key)
@@ -361,6 +431,7 @@ class AuditEntry:
         return {
             "timestamp": self.timestamp,
             "action": self.action,
+            "resource": self.resource,
             "result": self.result,
             "error": self.error,
             "envelope": envelope_dict,
@@ -477,6 +548,7 @@ def create_audit_entry(
     public_key: str,
     result: str = "success",
     error: Optional[str] = None,
+    resource: Optional[str] = None,
     **metadata
 ) -> AuditEntry:
     """
@@ -488,6 +560,7 @@ def create_audit_entry(
             action="transfer_funds",
             envelope=envelope,
             public_key=public_key,
+            resource="slos://vaults/finance/budget-2026",
             amount="0.1 ETH",
             recipient="0x123..."
         )
@@ -500,4 +573,5 @@ def create_audit_entry(
         result=result,
         error=error,
         metadata=metadata,
+        resource=resource,
     )
