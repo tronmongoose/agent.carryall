@@ -5,6 +5,7 @@ This module provides ACTUAL permission enforcement, not just bookkeeping.
 Tools wrapped with EnforcedTool will refuse to execute without valid envelopes.
 """
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from functools import wraps
@@ -12,6 +13,8 @@ from functools import wraps
 from .constraints import check_constraints, ConstraintResult
 from .envelope import verify_signature
 from .types import AuthorityEnvelope
+
+logger = logging.getLogger(__name__)
 
 
 class PermissionDenied(Exception):
@@ -86,6 +89,11 @@ def check_envelope(
         ConstraintViolation: If envelope constraints are violated
         ApprovalRequired: If action requires human approval per constraints
     """
+    logger.debug("Checking envelope",
+                 extra={"envelope_id": envelope.envelope_id,
+                        "agent_id": envelope.agent_id,
+                        "required_scope": required_scope})
+
     # 1. Verify signature - tamper detection
     if not verify_signature(envelope, public_key):
         raise InvalidSignature(
@@ -125,6 +133,11 @@ def check_envelope(
             raise ConstraintViolation(
                 f"Constraint violation: {'; '.join(result.violated)}"
             )
+
+    logger.info("Envelope check passed",
+                extra={"envelope_id": envelope.envelope_id,
+                       "agent_id": envelope.agent_id,
+                       "scope": required_scope})
 
 
 def _infer_action(scope: str) -> str:

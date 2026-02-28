@@ -30,12 +30,18 @@ Configuration (~/.carryall/config.json):
 import asyncio
 import json
 import os
+import signal
 import sys
+import time
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from .logging_config import configure_logging, new_request_id
+
+configure_logging()
 logger = logging.getLogger(__name__)
 
 from .keys import AgentKeyStore
@@ -91,17 +97,9 @@ class CarryallMCPServer:
                 key_store=self.key_store,
             )
         else:
-            # Check if the default SLOS config exists
-            default_config = Path("~/Desktop/sovereign-life-os/carryall-integration.json").expanduser()
-            if default_config.exists():
-                self.slos_backend = SlosBackend(
-                    config_path=str(default_config),
-                    key_store=self.key_store,
-                )
-            else:
-                # Standalone mode — no external backend required
-                logger.info("No SLOS config found. Starting with in-memory backend.")
-                self.slos_backend = MemoryBackend()
+            # Standalone mode — no external backend required
+            logger.info("No CARRYALL_SLOS_CONFIG set. Starting with in-memory backend.")
+            self.slos_backend = MemoryBackend()
 
         # Cache loaded envelopes
         self._envelope_cache: dict[str, AuthorityEnvelope] = {}
@@ -146,9 +144,13 @@ class CarryallMCPServer:
 
     async def handle_request(self, request: dict) -> dict:
         """Handle a JSON-RPC request."""
+        rid = new_request_id()
         method = request.get("method", "")
         params = request.get("params", {})
         request_id = request.get("id")
+        start = time.monotonic()
+
+        logger.info("Handling request", extra={"method": method})
 
         try:
             if method == "initialize":
@@ -164,15 +166,19 @@ class CarryallMCPServer:
                     "error": {"code": -32601, "message": f"Method not found: {method}"},
                 }
 
+            duration = (time.monotonic() - start) * 1000
+            logger.info("Request completed", extra={"method": method, "duration_ms": round(duration, 1)})
             return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
         except PermissionDenied as e:
+            logger.warning("Permission denied", extra={"method": method, "error": str(e)})
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "error": {"code": 403, "message": f"Permission denied: {e}"},
             }
         except InvalidSignature as e:
+            logger.warning("Invalid signature", extra={"method": method, "error": str(e)})
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -193,11 +199,12 @@ class CarryallMCPServer:
 
     async def _handle_initialize(self, params: dict) -> dict:
         """Handle MCP initialize request."""
+        from . import __version__
         return {
             "protocolVersion": "2024-11-05",
             "serverInfo": {
                 "name": "carryall",
-                "version": "0.1.0",
+                "version": __version__,
             },
             "capabilities": {
                 "tools": {},
@@ -1075,6 +1082,40 @@ class CarryallMCPServer:
             print("Install with: pip install aiohttp", file=sys.stderr)
             sys.exit(1)
 
+        # Auth and rate limiting configuration
+        api_key = os.environ.get("CARRYALL_API_KEY")
+        rate_limit = int(os.environ.get("CARRYALL_RATE_LIMIT", "100"))
+        rate_limiter = RateLimiter(max_requests=rate_limit)
+
+        if not api_key:
+            logger.warning("CARRYALL_API_KEY not set — HTTP endpoints are unauthenticated")
+
+        @web.middleware
+        async def auth_middleware(request: web.Request, handler):
+            """Bearer token auth + rate limiting. Health endpoints bypass auth."""
+            # Health endpoints always accessible
+            if request.path in ("/health", "/healthz"):
+                return await handler(request)
+
+            # Rate limiting
+            peer = request.remote or "unknown"
+            if not rate_limiter.check(peer):
+                logger.warning("Rate limit exceeded", extra={"peer": peer})
+                return web.json_response(
+                    {"error": "Rate limit exceeded"}, status=429
+                )
+
+            # Auth check
+            if api_key:
+                auth_header = request.headers.get("Authorization", "")
+                if not auth_header.startswith("Bearer ") or auth_header[7:] != api_key:
+                    return web.json_response(
+                        {"error": "Unauthorized", "message": "Invalid or missing API key"},
+                        status=401,
+                    )
+
+            return await handler(request)
+
         async def health_handler(request: web.Request) -> web.Response:
             """Health check endpoint."""
             return web.json_response({"status": "healthy", "service": "carryall-mcp"})
@@ -1134,7 +1175,7 @@ class CarryallMCPServer:
                 return web.json_response(response["error"], status=status)
             return web.json_response(response, status=500)
 
-        app = web.Application()
+        app = web.Application(middlewares=[auth_middleware])
         app.router.add_get("/health", health_handler)
         app.router.add_get("/healthz", health_handler)
         app.router.add_post("/rpc", rpc_handler)
@@ -1145,8 +1186,11 @@ class CarryallMCPServer:
         await runner.setup()
         site = web.TCPSite(runner, host, port)
 
+        logger.info("Carryall MCP Server starting (HTTP)", extra={"host": host, "port": port})
         print(f"Carryall MCP Server (HTTP)", file=sys.stderr)
         print(f"Listening on http://{host}:{port}", file=sys.stderr)
+        print(f"Auth: {'enabled (CARRYALL_API_KEY)' if api_key else 'DISABLED'}", file=sys.stderr)
+        print(f"Rate limit: {rate_limit} req/min", file=sys.stderr)
         print(f"Endpoints:", file=sys.stderr)
         print(f"  GET  /health          - Health check", file=sys.stderr)
         print(f"  POST /rpc             - JSON-RPC endpoint", file=sys.stderr)
@@ -1156,14 +1200,43 @@ class CarryallMCPServer:
 
         await site.start()
 
-        # Keep running until interrupted
-        try:
-            while True:
-                await asyncio.sleep(3600)
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await runner.cleanup()
+        # Graceful shutdown via signals
+        shutdown_event = asyncio.Event()
+        loop = asyncio.get_event_loop()
+
+        def _signal_handler():
+            logger.info("Shutdown signal received, draining connections...")
+            shutdown_event.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _signal_handler)
+            except NotImplementedError:
+                # Windows doesn't support add_signal_handler
+                pass
+
+        await shutdown_event.wait()
+        logger.info("Shutting down...")
+        await runner.cleanup()
+        logger.info("Shutdown complete")
+
+
+class RateLimiter:
+    """Simple in-memory sliding-window rate limiter per IP."""
+
+    def __init__(self, max_requests: int = 100, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, ip: str) -> bool:
+        now = time.monotonic()
+        # Prune expired timestamps
+        self._requests[ip] = [t for t in self._requests[ip] if now - t < self.window]
+        if len(self._requests[ip]) >= self.max_requests:
+            return False
+        self._requests[ip].append(now)
+        return True
 
 
 def main(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8765):
@@ -1174,6 +1247,7 @@ def main(transport: str = "stdio", host: str = "0.0.0.0", port: int = 8765):
         host: Host to bind to (HTTP mode only)
         port: Port to listen on (HTTP mode only)
     """
+    configure_logging()
     server = CarryallMCPServer()
 
     if transport == "http":

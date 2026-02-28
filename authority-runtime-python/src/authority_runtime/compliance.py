@@ -555,10 +555,11 @@ class ComplianceReport:
         return dc_section
 
     def _html_metadata(self, report: dict) -> str:
+        from . import __version__
         return f"""<table class="meta">
 <tr><td><strong>Report Type</strong></td><td>{_h(report.get('report_type', ''))}</td></tr>
 <tr><td><strong>Generated At</strong></td><td>{_h(report.get('generated_at', ''))}</td></tr>
-<tr><td><strong>Carryall Version</strong></td><td>0.2.0</td></tr>
+<tr><td><strong>Carryall Version</strong></td><td>{_h(__version__)}</td></tr>
 </table>"""
 
 

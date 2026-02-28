@@ -56,6 +56,7 @@ audit_app = typer.Typer(help="Query and verify audit logs")
 compliance_app = typer.Typer(help="FERPA/compliance reporting and attestation")
 policy_app = typer.Typer(help="YAML policy management")
 mcp_app = typer.Typer(help="MCP server for Clawdbot integration")
+db_app = typer.Typer(help="Database management")
 
 app.add_typer(keys_app, name="keys")
 app.add_typer(credentials_app, name="credentials")
@@ -64,6 +65,7 @@ app.add_typer(audit_app, name="audit")
 app.add_typer(compliance_app, name="compliance")
 app.add_typer(policy_app, name="policy")
 app.add_typer(mcp_app, name="mcp")
+app.add_typer(db_app, name="db")
 
 
 def get_keys_dir() -> str:
@@ -582,20 +584,29 @@ def audit_query(
     store = EnvelopeStore(str(db_path))
 
     if verify:
-        # Verify audit log integrity
-        # Note: Currently no hash-chaining, so just check signature validity
-        console.print("[yellow]Warning:[/yellow] Audit log hash-chaining not yet implemented.")
-        console.print("Checking signature validity of stored envelopes...")
+        # Verify audit trail hash chain integrity
+        console.print("Verifying audit trail hash chain...")
 
-        stats = store.get_stats()
-        console.print(f"Total envelopes: {stats['envelopes']['total']}")
-        console.print(f"Total audit entries: {stats['audit_trail']['total_actions']}")
-        console.print(f"Signature failures: {stats['audit_trail']['signature_failures']}")
+        result = store.verify_audit_chain()
 
-        if stats['audit_trail']['signature_failures'] > 0:
-            console.print("[red]⚠ Integrity check FAILED - signature failures detected[/red]")
+        console.print(f"Entries verified: {result['entries_checked']}")
+
+        if result["gaps"]:
+            console.print(f"[yellow]WARNING: {len(result['gaps'])} gap(s) detected (possible deletions)[/yellow]")
+            for expected, actual in result["gaps"]:
+                console.print(f"  Gap: expected id {expected}, found id {actual}")
+
+        if result["valid"]:
+            console.print(f"[green]Audit chain VALID. {result['entries_checked']} entries verified.[/green]")
         else:
-            console.print("[green]✓ All recorded signatures valid[/green]")
+            console.print(f"[red]Audit chain INVALID at entry #{result['first_invalid_id']}[/red]")
+            console.print(f"  Error: {result['error']}")
+
+        # Also check signature stats
+        stats = store.get_stats()
+        if stats['audit_trail']['signature_failures'] > 0:
+            console.print(f"[red]⚠ {stats['audit_trail']['signature_failures']} signature failure(s) detected[/red]")
+
         return
 
     # Query audit trail
@@ -689,14 +700,21 @@ def audit_stats(
 def audit_export(
     output: str = typer.Option("audit_export.json", "--output", "-o", help="Output file path"),
     agent_id: Optional[str] = typer.Option(None, "--agent", "-a", help="Filter by agent ID"),
+    since: Optional[str] = typer.Option(None, "--since", "-s", help="Time window (e.g., 30d, 90d, 365d)"),
     limit: int = typer.Option(10000, "--limit", "-n", help="Maximum entries to export"),
+    fmt: str = typer.Option("json", "--format", "-f", help="Output format: json or csv"),
 ):
-    """Export audit trail to JSON file for compliance archival.
+    """Export audit trail to JSON or CSV file for compliance archival.
 
-    Creates a portable JSON export of the audit trail that can be
+    Creates a portable export of the audit trail that can be
     submitted to compliance systems or archived.
+
+    Examples:
+        carryall audit export --since 90d --output report.json
+        carryall audit export --since 365d --format csv --output annual.csv
     """
-    import json
+    import json as json_mod
+    import csv
 
     db_path = Path(get_db_path()).expanduser()
 
@@ -705,23 +723,91 @@ def audit_export(
         return
 
     store = EnvelopeStore(str(db_path))
-    entries = store.get_audit_trail(agent_id=agent_id, limit=limit)
+
+    # Parse --since into start_time
+    start_time = None
+    if since:
+        start_time = _parse_since(since)
+
+    entries = store.get_audit_trail(agent_id=agent_id, start_time=start_time, limit=limit)
     stats = store.get_stats()
 
-    export_data = {
-        "export_timestamp": datetime.now(timezone.utc).isoformat(),
-        "database_path": str(db_path),
-        "statistics": stats,
-        "filter_agent_id": agent_id,
-        "entry_count": len(entries),
-        "entries": entries,
-    }
-
     output_path = Path(output)
-    output_path.write_text(json.dumps(export_data, indent=2, default=str))
 
-    console.print(f"[green]✓ Exported {len(entries)} audit entries to {output_path}[/green]")
+    if fmt == "csv":
+        if entries:
+            with open(output_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=entries[0].keys())
+                writer.writeheader()
+                writer.writerows(entries)
+        else:
+            output_path.write_text("")
+    else:
+        export_data = {
+            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "database_path": str(db_path),
+            "statistics": stats,
+            "filter_agent_id": agent_id,
+            "filter_since": since,
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+        output_path.write_text(json_mod.dumps(export_data, indent=2, default=str))
+
+    console.print(f"[green]Exported {len(entries)} audit entries to {output_path}[/green]")
     console.print(f"  Total size: {output_path.stat().st_size / 1024:.1f} KB")
+
+
+@audit_app.command("archive")
+def audit_archive(
+    older_than: str = typer.Option(..., "--older-than", help="Archive entries older than (e.g., 365d)"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
+):
+    """Archive old audit entries to a separate table.
+
+    Moves entries older than the specified threshold to audit_trail_archive.
+    Hash chain data is preserved. Gaps in the main table's ID sequence
+    will be detected by 'carryall audit --verify' as warnings.
+
+    Examples:
+        carryall audit archive --older-than 365d --yes
+    """
+    db_path = Path(get_db_path()).expanduser()
+
+    if not db_path.exists():
+        console.print("No audit database found.")
+        return
+
+    # Parse days from the threshold
+    if not older_than.endswith("d"):
+        console.print("[red]Error: --older-than must be in days (e.g., 365d)[/red]")
+        raise typer.Exit(code=1)
+
+    days = int(older_than[:-1])
+
+    if not yes:
+        console.print(f"This will archive audit entries older than {days} days.")
+        confirm = typer.confirm("Proceed?")
+        if not confirm:
+            console.print("Aborted.")
+            return
+
+    store = EnvelopeStore(str(db_path))
+    result = store.archive_audit_entries(older_than_days=days)
+    console.print(f"[green]Archived {result['archived_count']} entries (cutoff: {result['cutoff_date'][:10]})[/green]")
+
+
+def _parse_since(since: str) -> str:
+    """Parse a --since value like '30d', '90d', '1y' into an ISO timestamp."""
+    from datetime import timedelta
+    if since.endswith("d"):
+        days = int(since[:-1])
+    elif since.endswith("y"):
+        days = int(since[:-1]) * 365
+    else:
+        days = int(since)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return cutoff.isoformat()
 
 
 # =============================================================================
@@ -1132,6 +1218,68 @@ def policy_show(
             )
 
         console.print(dc_table)
+
+
+# =============================================================================
+# Database commands
+# =============================================================================
+
+
+@db_app.command("migrate")
+def db_migrate():
+    """Run pending schema migrations.
+
+    Automatically backs up the database before applying migrations.
+    Safe to run repeatedly — only pending migrations are applied.
+    """
+    from .storage import MIGRATIONS
+
+    db_path = Path(get_db_path()).expanduser()
+    store = EnvelopeStore(str(db_path))
+
+    version = store.get_schema_version()
+    latest = MIGRATIONS[-1][0] if MIGRATIONS else 0
+
+    if version >= latest:
+        console.print(f"[green]Database is up to date (version {version}).[/green]")
+    else:
+        console.print(f"[green]Migrations complete. Schema version: {store.get_schema_version()}[/green]")
+
+
+@db_app.command("status")
+def db_status():
+    """Show current schema version and migration history."""
+    from .storage import MIGRATIONS
+
+    db_path = Path(get_db_path()).expanduser()
+
+    if not db_path.exists():
+        console.print(f"No database found at {db_path}")
+        return
+
+    store = EnvelopeStore(str(db_path))
+    version = store.get_schema_version()
+    latest = MIGRATIONS[-1][0] if MIGRATIONS else 0
+
+    console.print(f"\n[bold]Database Status[/bold]")
+    console.print(f"Path: {db_path}")
+    console.print(f"Schema version: {version}")
+    console.print(f"Latest available: {latest}")
+
+    if version < latest:
+        console.print(f"[yellow]Pending migrations: {latest - version}[/yellow]")
+    else:
+        console.print(f"[green]All migrations applied.[/green]")
+
+    history = store.get_migration_history()
+    if history:
+        table = Table(title="Migration History")
+        table.add_column("Version", style="cyan")
+        table.add_column("Applied At", style="dim")
+        table.add_column("Description")
+        for m in history:
+            table.add_row(str(m["version"]), m["applied_at"][:19], m["description"])
+        console.print(table)
 
 
 # =============================================================================
