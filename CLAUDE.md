@@ -118,15 +118,30 @@ Use this structure in /docs/plan.md:
 
 \#\# 7\. Quality Gates
 
-\#\#\# Done Means  
-1\. Ran as a fresh user  
-2\. Core feature works end-to-end  
-3\. First 5-minute failures handled  
+\#\#\# Done Means
+1\. Ran as a fresh user
+2\. Core feature works end-to-end
+3\. First 5-minute failures handled
 4\. Claims match reality
+5\. Tests written for new or changed code
 
-\#\#\# Language Discipline  
-\- Separate exists vs works  
+\#\#\# Language Discipline
+\- Separate exists vs works
 \- Never say production-ready without verified end-to-end use
+
+\#\#\# Test Coverage Policy
+\- Every new module MUST have a corresponding test file (test\_\<module\>.py)
+\- Every new public function or class MUST have at least one test
+\- Security-sensitive code (auth, signing, policy enforcement, input sanitization) MUST have both positive and negative tests
+\- Bug fixes MUST include a regression test that fails without the fix
+\- Run `pytest tests/ -q` before declaring any task done — all tests must pass
+\- When modifying existing code, check if existing tests still cover the changed behavior; add tests if not
+\- Test patterns to follow:
+  \- Use fixtures for shared setup (keys, envelopes, temp dirs)
+  \- Use `unittest.mock` for external dependencies (LLM APIs, network)
+  \- Use `typer.testing.CliRunner` for CLI command tests
+  \- Use `pytest.mark.asyncio` for async code
+\- Coverage targets: aim for >70% line coverage on all modules; >90% on enforcement, signing, and policy modules
 
 \---
 
@@ -174,13 +189,16 @@ Do not remove features or change intent.
 
 \---
 
-\#\# 12\. Anti-Patterns  
-\- planning without reading code  
-\- parallelizing before interfaces are locked  
-\- over-engineering  
-\- “this should work” without running it  
-\- deleting context instead of documenting  
+\#\# 12\. Anti-Patterns
+\- planning without reading code
+\- parallelizing before interfaces are locked
+\- over-engineering
+\- “this should work” without running it
+\- deleting context instead of documenting
 \- fake or simulated validation metrics
+\- shipping new modules or features without tests
+\- adding code to security-sensitive paths without negative tests (rejection, tamper, escalation)
+\- marking a task done when tests are failing
 
 \---
 
