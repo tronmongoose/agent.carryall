@@ -1,0 +1,35 @@
+{{- if .Values.persistence.audit.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}-audit
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.audit.size }}
+  {{- if .Values.persistence.audit.storageClass }}
+  storageClassName: {{ .Values.persistence.audit.storageClass }}
+  {{- end }}
+---
+{{- end }}
+{{- if .Values.persistence.credentials.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}-credentials
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.persistence.credentials.size }}
+  {{- if .Values.persistence.credentials.storageClass }}
+  storageClassName: {{ .Values.persistence.credentials.storageClass }}
+  {{- end }}
+{{- end }}

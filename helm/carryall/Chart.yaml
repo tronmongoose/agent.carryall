@@ -1,0 +1,17 @@
+apiVersion: v2
+name: carryall
+description: Authority Runtime - IAM Control Plane for AI Agents
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+keywords:
+  - ai
+  - agents
+  - iam
+  - security
+  - policy
+home: https://github.com/tronmongoose/agent.carryall
+sources:
+  - https://github.com/tronmongoose/agent.carryall
+maintainers:
+  - name: Erik

@@ -1,0 +1,76 @@
+version: "1.0"
+organization: "Greenfield Academy"
+compliance_frameworks:
+  - FERPA
+
+data_classifications:
+  student-records:
+    sensitivity: confidential
+    pii_fields: ["ssn", "dob", "address", "phone", "email"]
+    retention_days: 2555  # 7 years FERPA requirement
+    description: "Student enrollment, academic, and demographic records"
+
+  student-health:
+    sensitivity: restricted
+    pii_fields: ["ssn", "dob", "diagnosis", "medication", "accommodation_details"]
+    retention_days: 2555
+    description: "Disability accommodations, health records — FERPA protected"
+
+  financial-aid:
+    sensitivity: confidential
+    pii_fields: ["ssn", "income", "bank_account", "tax_info"]
+    retention_days: 2555
+    description: "Scholarships, grants, loans, and financial need assessments"
+
+agents:
+  academic-advisor:
+    description: "Reads enrollment records for advising sessions"
+    scopes:
+      - "vault:student-records:read"
+    resources:
+      - "slos://vaults/student-records/*"
+    constraints:
+      require_purpose: true
+      max_records_per_request: 50
+    denied_resources:
+      - "slos://vaults/student-health/*"
+      - "slos://vaults/financial-aid/*"
+
+  financial-aid-agent:
+    description: "Manages financial aid records — scholarships, grants, loans"
+    scopes:
+      - "vault:financial-aid:read"
+      - "vault:financial-aid:write"
+    resources:
+      - "slos://vaults/financial-aid/*"
+    constraints:
+      require_purpose: true
+      write_requires_approval: true
+    denied_resources:
+      - "slos://vaults/student-health/*"
+      - "slos://vaults/student-records/*"
+
+  registrar-agent:
+    description: "Reads and writes student enrollment records"
+    scopes:
+      - "vault:student-records:read"
+      - "vault:student-records:write"
+    resources:
+      - "slos://vaults/student-records/*"
+    constraints:
+      require_purpose: true
+    denied_resources:
+      - "slos://vaults/student-health/*"
+      - "slos://vaults/financial-aid/*"
+
+  ferpa-auditor:
+    description: "Cross-vault read access for compliance reporting and attestation"
+    scopes:
+      - "vault:student-records:read"
+      - "vault:financial-aid:read"
+      - "vault:student-health:read"
+      - "audit:read"
+    resources:
+      - "slos://vaults/*"
+    constraints:
+      require_purpose: true

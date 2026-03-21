@@ -1,0 +1,21 @@
+apiVersion: v2
+name: clawdbot-carryall
+description: Isolated Clawdbot deployment with Carryall policy enforcement sidecar
+type: application
+version: 0.1.0
+appVersion: "2026.1.24"
+
+keywords:
+  - clawdbot
+  - carryall
+  - ai-agent
+  - policy-enforcement
+  - authority-runtime
+
+home: https://github.com/tronmongoose/agent.carryall
+
+maintainers:
+  - name: Erik H
+    email: erik@example.com
+
+dependencies: []

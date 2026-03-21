@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  carryall:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.carryall
+    ports:
+      - "8765:8765"
+    environment:
+      - CARRYALL_API_KEY=${CARRYALL_API_KEY:-}
+      - CARRYALL_LOG_LEVEL=${CARRYALL_LOG_LEVEL:-INFO}
+      - CARRYALL_LOG_FORMAT=${CARRYALL_LOG_FORMAT:-json}
+      - CARRYALL_RATE_LIMIT=${CARRYALL_RATE_LIMIT:-100}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - carryall-data:/home/carryall/.carryall
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  carryall-data:

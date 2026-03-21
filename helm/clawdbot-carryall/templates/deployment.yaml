@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "clawdbot-carryall.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "clawdbot-carryall.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "clawdbot-carryall.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        # Clawdbot gateway
+        - name: clawdbot
+          image: "{{ .Values.clawdbot.image.repository }}:{{ .Values.clawdbot.image.tag }}"
+          imagePullPolicy: {{ .Values.clawdbot.image.pullPolicy }}
+          command:
+            - clawdbot
+            - gateway
+            - --allow-unconfigured
+            - --bind
+            - lan
+            - --token
+            - $(CLAWDBOT_GATEWAY_TOKEN)
+          env:
+            - name: HOME
+              value: /home/clawdbot
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1024"
+            - name: CLAWDBOT_GATEWAY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clawdbot-carryall.fullname" . }}-secrets
+                  key: gateway-token
+            {{- if .Values.secrets.anthropicApiKey }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clawdbot-carryall.fullname" . }}-secrets
+                  key: anthropic-api-key
+            {{- end }}
+            {{- if .Values.secrets.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clawdbot-carryall.fullname" . }}-secrets
+                  key: openai-api-key
+            {{- end }}
+            # Carryall service URL for policy enforcement
+            {{- if .Values.carryall.external.enabled }}
+            - name: CARRYALL_URL
+              value: "{{ .Values.carryall.external.url }}"
+            {{- else if .Values.carryall.enabled }}
+            - name: CARRYALL_URL
+              value: "http://localhost:{{ .Values.carryall.port }}"
+            {{- end }}
+          ports:
+            - name: gateway
+              containerPort: {{ .Values.clawdbot.gateway.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.clawdbot.resources | nindent 12 }}
+          volumeMounts:
+            - name: clawdbot-home
+              mountPath: /home/clawdbot/.clawdbot
+            - name: clawdbot-config
+              mountPath: /home/clawdbot/.clawdbot/clawdbot.json
+              subPath: clawdbot.json
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+
+        {{- if and .Values.carryall.enabled (not .Values.carryall.external.enabled) }}
+        # Carryall policy sidecar (HTTP mode) - only when not using external service
+        - name: carryall
+          image: "{{ .Values.carryall.image.repository }}:{{ .Values.carryall.image.tag }}"
+          imagePullPolicy: {{ .Values.carryall.image.pullPolicy }}
+          command:
+            - carryall
+            - mcp
+            - serve
+            - --transport
+            - http
+            - --port
+            - "{{ .Values.carryall.port }}"
+          env:
+            - name: HOME
+              value: /home/carryall
+            {{- if .Values.secrets.carryallRootKey }}
+            - name: CARRYALL_ROOT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "clawdbot-carryall.fullname" . }}-secrets
+                  key: carryall-root-key
+            {{- end }}
+          ports:
+            - name: carryall
+              containerPort: {{ .Values.carryall.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.carryall.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.carryall.port }}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.carryall.resources | nindent 12 }}
+          volumeMounts:
+            - name: carryall-data
+              mountPath: /home/carryall/.carryall
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+        {{- end }}
+
+      volumes:
+        - name: clawdbot-home
+          emptyDir: {}
+        - name: clawdbot-config
+          configMap:
+            name: {{ include "clawdbot-carryall.fullname" . }}-config
+        {{- if and .Values.carryall.enabled (not .Values.carryall.external.enabled) }}
+        - name: carryall-data
+          emptyDir: {}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}

@@ -1,0 +1,88 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "clawdbot-carryall.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+
+  # Ingress: only allow traffic from within the namespace
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespace }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.clawdbot.gateway.port }}
+
+  # Egress: only allow specific destinations
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow LLM API endpoints
+    {{- range .Values.networkPolicy.allowedEgress }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: {{ .port }}
+    {{- end }}
+
+    # Allow communication with carryall service (external or sidecar)
+    {{- if .Values.carryall.external.enabled }}
+    # External carryall service in default namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: default
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: carryall
+      ports:
+        - protocol: TCP
+          port: 8765
+    {{- else }}
+    # Sidecar mode: pod-to-pod communication
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "clawdbot-carryall.selectorLabels" . | nindent 14 }}
+    {{- end }}
+
+---
+# Deny all egress by default for extra security
+{{- if .Values.networkPolicy.denyAllEgress }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}-deny-all
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "clawdbot-carryall.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress: []  # Deny all - the other policy adds specific allows
+{{- end }}
+{{- end }}

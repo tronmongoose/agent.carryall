@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slos/schemas/metadata.schema.json",
+  "title": "SLOS Document Metadata",
+  "description": "Schema for YAML frontmatter metadata in all documents",
+  "type": "object",
+  "required": ["id", "created", "modified", "author", "domain", "sensitivity", "data_type"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v7 (time-sortable) unique identifier"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 creation timestamp"
+    },
+    "modified": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 last modification timestamp"
+    },
+    "author": {
+      "type": "string",
+      "pattern": "^(erik|janelle|agent:[a-z0-9-]+)$",
+      "description": "Entity that created/owns the document"
+    },
+    "domain": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["startup", "finance", "health", "family", "personal", "legal", "meta"]
+      },
+      "minItems": 1,
+      "description": "Primary domain(s) this document belongs to"
+    },
+    "sensitivity": {
+      "type": "string",
+      "enum": ["public", "internal", "confidential", "restricted"],
+      "description": "Data sensitivity classification"
+    },
+    "data_type": {
+      "type": "string",
+      "enum": ["note", "transaction", "document", "record", "credential", "log"],
+      "description": "Type of data this document contains"
+    },
+    "business_entity": {
+      "type": ["string", "null"],
+      "enum": ["huckle-llc", null],
+      "description": "Business entity this belongs to, if any"
+    },
+    "family_member": {
+      "type": ["string", "null"],
+      "enum": ["erik", "janelle", "shared", null],
+      "description": "Family member this belongs to, if any"
+    },
+    "allowed_agents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+-agent$"
+      },
+      "description": "Explicit list of agents allowed to access this document"
+    },
+    "denied_agents": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+-agent$"
+      },
+      "description": "Explicit list of agents denied access (takes precedence)"
+    },
+    "requires_approval": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["external-share", "cross-domain-query", "delete", "bulk-export", "modify"]
+      },
+      "description": "Actions requiring human approval"
+    },
+    "jurisdiction": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Legal jurisdictions that apply to this document"
+    },
+    "retention": {
+      "type": "string",
+      "enum": ["ephemeral", "1-year", "7-year", "permanent"],
+      "description": "How long to retain this document"
+    },
+    "audit_level": {
+      "type": "string",
+      "enum": ["none", "basic", "full"],
+      "default": "basic",
+      "description": "Level of audit logging for access to this document"
+    },
+    "related": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "description": "UUIDs of related documents"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Freeform tags for search and categorization"
+    }
+  }
+}

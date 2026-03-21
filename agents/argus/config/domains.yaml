@@ -1,0 +1,110 @@
+version: "1.0"
+
+# ARGUS Domain Boundary Definitions
+# Each domain defines vault paths and the sensitive patterns that belong to it.
+# ARGUS scans for these patterns appearing OUTSIDE their home domain.
+
+domains:
+  financial:
+    description: "Household financial data"
+    authorized_agents: ["finance-agent", "slos.auditor"]
+    vault_paths:
+      - "~/slos/vaults/finance"
+    sensitive_patterns:
+      - type: "credit_card"
+        regex: '(?<![.\d])(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})(?![.\d])'
+        severity: "CRITICAL"
+      - type: "routing_number"
+        regex: '(?<![.\da-fA-Fx])0[0-9]{8}(?![0-9a-fA-F])'
+        severity: "HIGH"
+      - type: "large_dollar_amount"
+        regex: '\$[0-9]{4,}(?:\.[0-9]{2})?'
+        severity: "MEDIUM"
+
+  health:
+    description: "Health and biometric data"
+    authorized_agents: ["health-agent", "slos.auditor"]
+    vault_paths:
+      - "~/slos/vaults/health"
+    sensitive_patterns:
+      - type: "ssn"
+        regex: '\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
+        severity: "CRITICAL"
+      - type: "medical_record_number"
+        regex: '\bMRN[-:\s]?[0-9]{6,10}\b'
+        severity: "HIGH"
+      - type: "clinical_language"
+        regex: '\b(?:diagnosis|prescribed|medication|dosage|mg/dl|mmhg)\b'
+        severity: "MEDIUM"
+
+  identity:
+    description: "Credentials, keys, tokens"
+    authorized_agents: ["slos.carryall", "slos.auditor"]
+    vault_paths:
+      - "~/slos/config/carryall/keys"
+      - "~/slos/config/email.env"
+    sensitive_patterns:
+      - type: "pem_private_key"
+        regex: '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'
+        severity: "CRITICAL"
+      - type: "aws_access_key"
+        regex: 'AKIA[0-9A-Z]{16}'
+        severity: "CRITICAL"
+      - type: "api_key_generic"
+        regex: '(?:sk|pk|api|token|secret)[-_][A-Za-z0-9]{20,}'
+        severity: "CRITICAL"
+      - type: "jwt_token"
+        regex: 'eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+        severity: "HIGH"
+
+  community:
+    description: "6529 community intelligence, wallet data"
+    authorized_agents: ["community-agent", "slos.auditor"]
+    vault_paths:
+      - "~/slos/vaults/community"
+    sensitive_patterns:
+      - type: "eth_private_key"
+        regex: '0x[a-fA-F0-9]{64}'
+        severity: "CRITICAL"
+      - type: "eth_wallet_address"
+        regex: '0x[a-fA-F0-9]{40}'
+        severity: "MEDIUM"
+
+  personal:
+    description: "Personal data, journal, email"
+    authorized_agents: ["personal-agent", "email-agent", "slos.auditor"]
+    vault_paths:
+      - "~/slos/vaults/personal"
+    sensitive_patterns:
+      - type: "ssn"
+        regex: '\b(?!000|666|9\d{2})\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
+        severity: "CRITICAL"
+
+  startup:
+    description: "Startup project data"
+    authorized_agents: ["startup-agent", "slos.auditor"]
+    vault_paths:
+      - "~/slos/vaults/startup"
+    sensitive_patterns: []
+
+  orchestration:
+    description: "Agent config, policies, Carryall envelopes — no payload data"
+    authorized_agents: ["slos.carryall", "slos.auditor"]
+    vault_paths:
+      - "~/slos/agents/agents"
+      - "~/slos/agents/policies"
+    forbidden_pattern_sources: ["financial", "health", "identity"]
+
+# Explicit permissions for patterns to appear outside their home domain.
+# Everything not listed here is a violation.
+cross_domain_allowances:
+  - from: "identity"
+    to: "orchestration"
+    allowed_types: ["jwt_token"]
+    note: "Carryall may hold signed envelopes, not raw credentials"
+
+# Paths excluded from scanning entirely (e.g., ARGUS's own config/tests
+# which necessarily contain sample patterns for testing).
+exclude_paths:
+  - "~/slos/agents/agents/argus"
+  - "~/slos/agents/agents/venture"

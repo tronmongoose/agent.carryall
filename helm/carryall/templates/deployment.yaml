@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "carryall.fullname" . }}
+  labels:
+    {{- include "carryall.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "carryall.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- if or .Values.secrets.openaiApiKey .Values.secrets.anthropicApiKey }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "carryall.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "carryall.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: carryall
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - carryall
+            - mcp
+            - serve
+            - --transport
+            - http
+            - --host
+            - "{{ .Values.server.host }}"
+            - --port
+            - "{{ .Values.server.port }}"
+          env:
+            - name: HOME
+              value: /home/carryall
+            {{- if .Values.secrets.openaiApiKey }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "carryall.fullname" . }}-secrets
+                  key: openai-api-key
+            {{- end }}
+            {{- if .Values.secrets.anthropicApiKey }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "carryall.fullname" . }}-secrets
+                  key: anthropic-api-key
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: carryall-data
+              mountPath: /home/carryall/.carryall
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+
+      volumes:
+        - name: carryall-data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "carryall.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}

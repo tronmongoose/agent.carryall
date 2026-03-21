@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clawdbot-carryall.fullname" . }}-config
+  labels:
+    {{- include "clawdbot-carryall.labels" . | nindent 4 }}
+data:
+  clawdbot.json: |
+    {
+      "agents": {
+        "defaults": {
+          "model": {
+            "primary": {{ .Values.clawdbot.agent.model | quote }}
+          }
+        }
+      },
+      "gateway": {
+        "mode": "local"
+      },
+      "plugins": {
+        "entries": {
+          "carryall": {
+            "enabled": true,
+            "config": {
+              {{- if .Values.carryall.external.enabled }}
+              "carryallUrl": "{{ .Values.carryall.external.url }}",
+              {{- else if .Values.carryall.enabled }}
+              "carryallUrl": "http://localhost:{{ .Values.carryall.port }}",
+              {{- else }}
+              "carryallUrl": "http://localhost:8765",
+              {{- end }}
+              "defaultLlmProvider": "openai",
+              "defaultTtlSeconds": 300
+            }
+          }
+        }
+      }
+    }
+  # Carryall endpoint for skills to use
+  carryall-endpoint.env: |
+    {{- if .Values.carryall.external.enabled }}
+    CARRYALL_URL={{ .Values.carryall.external.url }}
+    {{- else if .Values.carryall.enabled }}
+    CARRYALL_URL=http://localhost:{{ .Values.carryall.port }}
+    {{- end }}

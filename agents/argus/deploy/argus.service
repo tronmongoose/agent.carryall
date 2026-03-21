@@ -1,0 +1,96 @@
+[Unit]
+Description=ARGUS Data Locality Scanner
+Documentation=file:///opt/argus/README.md
+After=network.target
+
+[Service]
+Type=simple
+User=argus
+Group=argus
+
+ExecStart=/opt/argus/venv/bin/python -m agents.argus.runner \
+    --config /opt/argus/config/domains.yaml \
+    --audit-log /var/log/argus/audit.jsonl \
+    --escalation-log /var/log/argus/escalation.jsonl \
+    --daemon \
+    --interval-seconds 3600
+
+WorkingDirectory=/opt/argus
+
+# Filesystem isolation
+ReadOnlyPaths=/
+ReadWritePaths=/var/log/argus
+ReadWritePaths=/opt/argus
+TemporaryFileSystem=/tmp:rw,noexec,nosuid
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictRealtime=true
+
+# Network: deny all except Tailscale
+IPAddressDeny=any
+IPAddressAllow=100.64.0.0/10
+IPAddressAllow=127.0.0.0/8
+
+# Clean environment — no inherited vars
+Environment=
+Environment=PYTHONPATH=/opt/argus
+Environment=HOME=/opt/argus
+
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target
+
+# ---
+# macOS launchd equivalent (for Mac Mini migration):
+#
+# <?xml version="1.0" encoding="UTF-8"?>
+# <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+# <plist version="1.0">
+# <dict>
+#   <key>Label</key>
+#   <string>com.sovereign.argus</string>
+#   <key>ProgramArguments</key>
+#   <array>
+#     <string>/opt/argus/venv/bin/python</string>
+#     <string>-m</string>
+#     <string>agents.argus.runner</string>
+#     <string>--config</string>
+#     <string>/opt/argus/config/domains.yaml</string>
+#     <string>--audit-log</string>
+#     <string>/var/log/argus/audit.jsonl</string>
+#     <string>--escalation-log</string>
+#     <string>/var/log/argus/escalation.jsonl</string>
+#     <string>--daemon</string>
+#     <string>--interval-seconds</string>
+#     <string>3600</string>
+#   </array>
+#   <key>UserName</key>
+#   <string>argus</string>
+#   <key>WorkingDirectory</key>
+#   <string>/opt/argus</string>
+#   <key>RunAtLoad</key>
+#   <true/>
+#   <key>KeepAlive</key>
+#   <dict>
+#     <key>SuccessfulExit</key>
+#     <false/>
+#   </dict>
+#   <key>StandardOutPath</key>
+#   <string>/var/log/argus/stdout.log</string>
+#   <key>StandardErrorPath</key>
+#   <string>/var/log/argus/stderr.log</string>
+#   <key>EnvironmentVariables</key>
+#   <dict>
+#     <key>PYTHONPATH</key>
+#     <string>/opt/argus</string>
+#   </dict>
+# </dict>
+# </plist>

@@ -1,0 +1,139 @@
+# Clawdbot + Carryall Helm Values
+# Isolated AI agent with cryptographic policy enforcement
+
+# -- Global settings
+namespace: clawdbot
+
+# -- Clawdbot configuration
+clawdbot:
+  image:
+    repository: ghcr.io/tronmongoose/clawdbot
+    tag: "0.2.0"
+    pullPolicy: IfNotPresent
+
+  # Gateway configuration
+  gateway:
+    port: 18789
+    auth:
+      enabled: true
+    bind: "0.0.0.0"  # Listen on all interfaces within pod
+
+  # Agent model configuration
+  agent:
+    model: "openai/gpt-4o"
+    maxConcurrent: 2
+    subagents:
+      maxConcurrent: 4
+
+  # Resource limits (constrain the agent)
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+# -- Carryall policy enforcement
+carryall:
+  # Sidecar mode (embedded in pod) - set to false when using external service
+  enabled: false
+  image:
+    repository: ghcr.io/tronmongoose/carryall
+    tag: "0.3.0"
+    pullPolicy: IfNotPresent
+
+  # MCP server port (internal sidecar mode)
+  port: 8765
+
+  # External carryall service (recommended for multi-agent architecture)
+  external:
+    enabled: true
+    # URL of standalone carryall service (use K8s service DNS)
+    url: "http://carryall.default.svc.cluster.local:8765"
+
+  # Policy defaults
+  policy:
+    defaultDeny: true
+    requireApprovalFor:
+      - "vault:*:write"
+      - "vault:*:delete"
+    auditAll: true
+
+  # Resource limits (sidecar mode only)
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+# -- Secrets (provide via --set or external secrets manager)
+secrets:
+  # API keys - at least one required
+  anthropicApiKey: ""
+  openaiApiKey: ""
+
+  # Carryall root signing key (base64 encoded Ed25519 seed)
+  # Generate with: python -c "from nacl.signing import SigningKey; import base64; print(base64.b64encode(SigningKey.generate()._seed).decode())"
+  carryallRootKey: ""
+
+# -- Network policies
+networkPolicy:
+  enabled: true
+
+  # Allowed egress destinations
+  allowedEgress:
+    # LLM API endpoints
+    - host: api.anthropic.com
+      port: 443
+    - host: api.openai.com
+      port: 443
+    # SLOS endpoint (if applicable)
+    # - host: slos.example.com
+    #   port: 443
+
+  # Block all other egress by default
+  denyAllEgress: true
+
+# -- Storage
+persistence:
+  # Audit logs
+  audit:
+    enabled: true
+    size: 1Gi
+    storageClass: ""
+
+  # Credentials/envelopes (encrypted at rest)
+  credentials:
+    enabled: true
+    size: 100Mi
+    storageClass: ""
+
+# -- Pod security context (applies to pod)
+podSecurityContext:
+  fsGroup: 999
+
+# -- Container security context (applies to containers)
+containerSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 999
+  runAsGroup: 999
+  readOnlyRootFilesystem: false  # Clawdbot needs to write runtime files
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Pod settings
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "authority-runtime"
+version = "0.3.0"
+description = "IAM + Context Control Plane for AI Agents — cryptographic policy enforcement with Ed25519 signed envelopes"
+readme = "README.md"
+authors = [
+    { name = "Authority Runtime", email = "hello@authority-runtime.dev" }
+]
+license = { text = "BSL-1.1" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Core dependencies — enough for envelope signing, enforcement, CLI, and in-memory backend
+dependencies = [
+    "pynacl>=1.5.0",       # Ed25519 signing
+    "pydantic>=2.0.0",     # Type validation
+    "typer>=0.9.0",        # CLI framework
+    "rich>=13.0.0",        # CLI formatting
+    "aiohttp>=3.9.0",      # HTTP transport for MCP server
+    "pyyaml>=6.0",         # YAML policy files
+    "pyrage>=1.2.0",       # age-x25519 encryption at rest for vault documents
+]
+
+[project.scripts]
+carryall = "authority_runtime.cli:app"
+
+[project.optional-dependencies]
+llm = [
+    "openai>=1.10.0,<2.0.0",
+    "anthropic>=0.7.0",
+]
+langchain = [
+    "langchain>=1.0.0",
+    "langchain-core>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "langgraph>=0.2.0",
+]
+all = [
+    "authority-runtime[llm,langchain]",
+]
+dev = [
+    "authority-runtime[all]",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/tronmongoose/agent.carryall"
+Repository = "https://github.com/tronmongoose/agent.carryall"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true

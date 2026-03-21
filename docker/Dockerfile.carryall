@@ -1,0 +1,62 @@
+# Carryall - Authority Runtime for AI Agents
+# Provides policy enforcement sidecar for Clawdbot
+
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python -m venv /opt/carryall
+
+# Install authority-runtime from local source
+COPY authority-runtime-python/ /build/authority-runtime-python/
+RUN /opt/carryall/bin/pip install --no-cache-dir /build/authority-runtime-python/
+
+# --- Production image ---
+FROM python:3.11-slim
+
+# Security: run as non-root user (UID 1000 for K8s compatibility)
+RUN groupadd -r -g 1000 carryall && useradd -r -u 1000 -g carryall -d /home/carryall -m carryall
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/carryall /opt/carryall
+
+# Create data directories
+RUN mkdir -p /home/carryall/.carryall/audit \
+             /home/carryall/.carryall/credentials \
+             /home/carryall/.carryall/keys \
+    && chown -R carryall:carryall /home/carryall
+
+# Add venv to PATH
+ENV PATH="/opt/carryall/bin:$PATH"
+ENV HOME="/home/carryall"
+
+# Switch to non-root user
+USER carryall
+WORKDIR /home/carryall
+
+# Install curl for health checks
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+USER carryall
+
+# Health check (HTTP endpoint)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -sf http://localhost:8765/health || exit 1
+
+# Default command: run MCP server in HTTP mode for Kubernetes
+CMD ["carryall", "mcp", "serve", "--transport", "http", "--port", "8765"]
+
+# Expose MCP HTTP port
+EXPOSE 8765
+
+# Labels
+LABEL org.opencontainers.image.source="https://github.com/tronmongoose/agent.carryall"
+LABEL org.opencontainers.image.description="Carryall - Authority Runtime policy enforcement for AI agents"
+LABEL org.opencontainers.image.licenses="MIT"
