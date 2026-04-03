@@ -45,8 +45,8 @@ from context_manager import assemble_context_block
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 FRONTIER_MODEL = os.environ.get("CLAWROUTER_FRONTIER_MODEL", "claude-sonnet-4-20250514")
-LOCAL_MODEL = os.environ.get("CLAWROUTER_LOCAL_MODEL", "mistral-small-3.2")
-ROUTER_MODEL = os.environ.get("CLAWROUTER_ROUTER_MODEL", "hermes3:8b")
+LOCAL_MODEL = os.environ.get("CLAWROUTER_LOCAL_MODEL", "gemma4:26b")
+ROUTER_MODEL = os.environ.get("CLAWROUTER_ROUTER_MODEL", "gemma4:26b")
 
 USAGE_LOG = Path(SLOS_DIR) / "vaults" / "finance" / "router-usage.jsonl"
 

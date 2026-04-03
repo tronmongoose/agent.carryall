@@ -25,7 +25,7 @@ from urllib.request import Request, urlopen
 SLOS_DIR = os.path.expanduser(os.environ.get("SLOS_DIR", "~/slos"))
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_COMPILER_MODEL", "mistral-small-3.2")
+OLLAMA_MODEL = os.environ.get("OLLAMA_COMPILER_MODEL", "gemma4:26b")
 
 
 def load_env(dotenv_path: Path | str | None = None):

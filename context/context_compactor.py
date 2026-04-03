@@ -36,7 +36,7 @@ from usecases.context_manager import ContextStore
 log = logging.getLogger("slos-compactor")
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_COMPILER_MODEL", "mistral-small-3.2")
+OLLAMA_MODEL = os.environ.get("OLLAMA_COMPILER_MODEL", "gemma4:26b")
 
 # Sonnet for condensed (depth 1+) summaries
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
