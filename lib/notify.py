@@ -74,12 +74,50 @@ def _split_chunks(text, max_len=4000):
     return chunks
 
 
-def send_telegram(text, title=None):
-    """Send a message to all configured Telegram recipients."""
+def _forum_enabled():
+    return os.environ.get("TELEGRAM_FORUM_ENABLED", "").lower() == "true"
+
+
+def _get_forum_config():
+    """Get forum chat ID and topic thread_id map when forum mode is active."""
+    if not _forum_enabled():
+        return None, {}
+    chat_id = os.environ.get("TELEGRAM_FORUM_CHAT_ID", "")
+    if not chat_id:
+        return None, {}
+    # Lazy import — topic_manager lives in telegram/ dir
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "telegram"))
+        from topic_manager import load_topic_map
+        return chat_id, load_topic_map()
+    except ImportError:
+        return chat_id, {}
+
+
+def send_telegram(text, title=None, parse_mode="Markdown", reply_markup=None, topic_key=None):
+    """Send a message to all configured Telegram recipients.
+
+    Args:
+        reply_markup: Optional dict for inline keyboards, e.g.
+            {"inline_keyboard": [[{"text": "OK", "callback_data": "ok"}]]}
+        topic_key: Forum topic to send to (e.g. "finance", "venture").
+            Only used when TELEGRAM_FORUM_ENABLED=true.
+    """
     token, chat_ids = _get_telegram_config()
-    if not token or not chat_ids:
-        print("  NOTIFY: Telegram not configured (missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_IDS)")
+    if not token:
+        print("  NOTIFY: Telegram not configured (missing TELEGRAM_BOT_TOKEN)")
         return False
+
+    # Forum mode: route to supergroup topic instead of private chat
+    forum_chat_id, topic_map = _get_forum_config()
+    if forum_chat_id:
+        chat_ids = [forum_chat_id]
+
+    if not chat_ids:
+        print("  NOTIFY: No Telegram recipients configured")
+        return False
+
+    thread_id = topic_map.get(topic_key) if topic_key and forum_chat_id else None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     chunks = _split_chunks(text)
@@ -87,21 +125,29 @@ def send_telegram(text, title=None):
 
     for chat_id in chat_ids:
         for i, chunk in enumerate(chunks):
-            body = json.dumps({
+            payload = {
                 "chat_id": chat_id,
                 "text": chunk,
-                "parse_mode": "Markdown",
-            }).encode("utf-8")
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            if thread_id:
+                payload["message_thread_id"] = thread_id
+            # Only attach keyboard to last chunk
+            if reply_markup and i == len(chunks) - 1:
+                payload["reply_markup"] = reply_markup
+            body = json.dumps(payload).encode("utf-8")
             req = Request(url, method="POST", data=body)
             req.add_header("Content-Type", "application/json")
             try:
                 with urlopen(req, timeout=15) as resp:
                     result = json.loads(resp.read().decode("utf-8"))
                     if result.get("ok"):
+                        topic_info = f" [topic:{topic_key}]" if topic_key and thread_id else ""
                         if len(chunks) > 1:
-                            print(f"  Sent chunk {i + 1}/{len(chunks)} to Telegram {chat_id}")
+                            print(f"  Sent chunk {i + 1}/{len(chunks)} to Telegram {chat_id}{topic_info}")
                         else:
-                            print(f"  Sent to Telegram {chat_id}")
+                            print(f"  Sent to Telegram {chat_id}{topic_info}")
                     else:
                         print(f"  Telegram failed for {chat_id}: {result.get('description')}")
                         ok = False
@@ -189,6 +235,26 @@ def _contains_financial_data(text: str) -> bool:
     return any(p.search(text) for p in _FINANCIAL_RE)
 
 
+# Map ntfy topic slugs → Telegram forum topic keys
+# Used by notify() to auto-route to the correct forum topic
+NTFY_TO_TELEGRAM_TOPIC = {
+    "finance-daily": "finance",
+    "finance-weekly": "finance",
+    "finance-investments": "finance",
+    "cost-ops": "finance",
+    "venture": "venture",
+    "community": "community",
+    "exit-watch": "system",
+    "health": "system",
+    "digest": "general",
+    "email-digest": "email",
+    "quality-gate": "approvals",
+    "sentinel-alert": "approvals",
+    "content-approval": "approvals",
+    "general": "general",
+}
+
+
 def notify(text, title="Notification", topic="general", sensitive=False,
            priority="default", tags=None, click_url=None):
     """Route notification based on sensitivity. Financial content → ntfy only.
@@ -206,6 +272,9 @@ def notify(text, title="Notification", topic="general", sensitive=False,
         print("  GUARD: Financial data detected in non-sensitive notification — upgrading to ntfy")
         sensitive = True
 
+    # Derive Telegram forum topic from ntfy topic slug
+    telegram_topic = NTFY_TO_TELEGRAM_TOPIC.get(topic, "general")
+
     if sensitive:
         ntfy_url, _ = _get_ntfy_config()
         if ntfy_url:
@@ -217,6 +286,6 @@ def notify(text, title="Notification", topic="general", sensitive=False,
                 print("  BLOCKED: Financial data cannot route to Telegram (ntfy unavailable)")
                 return False
             print("  NOTIFY: ntfy not configured, falling back to Telegram for sensitive data")
-            return send_telegram(text, title=title)
+            return send_telegram(text, title=title, topic_key=telegram_topic)
     else:
-        return send_telegram(text, title=title)
+        return send_telegram(text, title=title, topic_key=telegram_topic)
