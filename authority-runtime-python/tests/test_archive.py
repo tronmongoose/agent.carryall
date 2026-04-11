@@ -5,7 +5,6 @@ Tests for audit archive, export, and version alignment (D4).
 import os
 import sqlite3
 import tempfile
-import time
 import pytest
 from datetime import datetime, timezone, timedelta
 

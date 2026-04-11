@@ -17,7 +17,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Any
 
-import nacl.signing
 
 from ..keys import AgentKeyStore
 from ..crypto import encrypt_document, decrypt_document, is_encrypted

@@ -168,7 +168,7 @@ class ComplianceReport:
         return {
             "report_type": "negative_attestation",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "result": f"CONFIRMED: 0 access events found" if confirmed
+            "result": "CONFIRMED: 0 access events found" if confirmed
                      else f"FAILED: {count} access event(s) found",
             "confirmed": confirmed,
             "count": count,

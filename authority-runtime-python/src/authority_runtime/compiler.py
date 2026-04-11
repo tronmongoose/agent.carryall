@@ -17,7 +17,6 @@ from .types import (
     Skill,
     SkillSelection,
     Authority,
-    Context,
     AuthorityEnvelope,
     TokenMetrics,
 )
@@ -147,10 +146,6 @@ class LLMCompiler(ABC):
 
         # Sanitize user input to prevent prompt injection
         sanitized_request = _sanitize_user_input(user_request)
-
-        skills_json = json.dumps(
-            [skill.model_dump() for skill in available_skills], indent=2
-        )
 
         # Parse scope structure for better LLM understanding
         scope_descriptions = []

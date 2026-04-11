@@ -35,22 +35,20 @@ import sys
 import time
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from .logging_config import configure_logging, new_request_id
-
-configure_logging()
-logger = logging.getLogger(__name__)
-
+from .logging_config import configure_logging
 from .keys import AgentKeyStore
 from .storage import EnvelopeStore
 from .types import AuthorityEnvelope, Skill, Authority, Context
-from .enforce import check_envelope, create_audit_entry, PermissionDenied, InvalidSignature, EnvelopeExpired, ConstraintViolation, ApprovalRequired
+from .enforce import check_envelope, create_audit_entry, PermissionDenied, InvalidSignature, EnvelopeExpired
 from .approvals import ApprovalQueue
 from .backends.slos import SlosBackend, Decision
 from .backends.memory import MemoryBackend
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 try:
     from .compiler import OpenAICompiler, AnthropicCompiler, compile_policy
@@ -225,7 +223,6 @@ class CarryallMCPServer:
 
     async def handle_request(self, request: dict) -> dict:
         """Handle a JSON-RPC request."""
-        rid = new_request_id()
         method = request.get("method", "")
         params = request.get("params", {})
         request_id = request.get("id")
@@ -724,7 +721,6 @@ class CarryallMCPServer:
         """
         import os
         import uuid
-        from datetime import datetime, timezone, timedelta
         from .envelope import create_envelope
 
         agent_id = arguments.get("agent_id")
@@ -1175,7 +1171,6 @@ class CarryallMCPServer:
             if len(parts) >= 2:
                 namespace = parts[0]
                 action = parts[-1] if len(parts) > 2 else "access"
-                resource = parts[1] if len(parts) > 1 else "*"
 
                 skill = Skill(
                     id=f"skill-{namespace}-{action}",
@@ -1358,16 +1353,16 @@ class CarryallMCPServer:
         site = web.TCPSite(runner, host, port)
 
         logger.info("Carryall MCP Server starting (HTTP)", extra={"host": host, "port": port})
-        print(f"Carryall MCP Server (HTTP)", file=sys.stderr)
+        print("Carryall MCP Server (HTTP)", file=sys.stderr)
         print(f"Listening on http://{host}:{port}", file=sys.stderr)
         print(f"Auth: {'enabled (CARRYALL_API_KEY)' if api_key else 'DISABLED'}", file=sys.stderr)
         print(f"Rate limit: {rate_limit} req/min", file=sys.stderr)
-        print(f"Endpoints:", file=sys.stderr)
-        print(f"  GET  /health          - Health check", file=sys.stderr)
-        print(f"  POST /rpc             - JSON-RPC endpoint", file=sys.stderr)
-        print(f"  GET  /tools           - List available tools", file=sys.stderr)
-        print(f"  POST /tools/<name>    - Call a tool", file=sys.stderr)
-        print(f"Press Ctrl+C to stop.", file=sys.stderr)
+        print("Endpoints:", file=sys.stderr)
+        print("  GET  /health          - Health check", file=sys.stderr)
+        print("  POST /rpc             - JSON-RPC endpoint", file=sys.stderr)
+        print("  GET  /tools           - List available tools", file=sys.stderr)
+        print("  POST /tools/<name>    - Call a tool", file=sys.stderr)
+        print("Press Ctrl+C to stop.", file=sys.stderr)
 
         await site.start()
 

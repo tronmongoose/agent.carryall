@@ -27,7 +27,7 @@ def db_path():
 
 class TestSchemaVersions:
     def test_fresh_db_creates_schema_versions_table(self, db_path):
-        store = EnvelopeStore(db_path)
+        EnvelopeStore(db_path)
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_versions'")
@@ -117,7 +117,7 @@ class TestSchemaVersions:
 
 class TestWALMode:
     def test_wal_mode_enabled(self, db_path):
-        store = EnvelopeStore(db_path)
+        EnvelopeStore(db_path)
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("PRAGMA journal_mode")
@@ -126,7 +126,7 @@ class TestWALMode:
         conn.close()
 
     def test_synchronous_full(self, db_path):
-        store = EnvelopeStore(db_path)
+        EnvelopeStore(db_path)
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute("PRAGMA synchronous")
@@ -182,7 +182,7 @@ class TestBackup:
         conn.close()
 
         # Open with EnvelopeStore — triggers migration + backup
-        store = EnvelopeStore(db_path)
+        EnvelopeStore(db_path)
 
         bak_path = db_path + ".bak"
         assert os.path.exists(bak_path)
@@ -190,7 +190,7 @@ class TestBackup:
 
     def test_no_backup_when_no_pending_migrations(self, db_path):
         """Fresh DB (all migrations applied) does not create a backup."""
-        store = EnvelopeStore(db_path)
+        EnvelopeStore(db_path)
         bak_path = db_path + ".bak"
         assert not os.path.exists(bak_path)
 

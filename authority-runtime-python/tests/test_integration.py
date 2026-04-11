@@ -11,8 +11,6 @@ These tests validate the full system working together:
 
 import os
 import tempfile
-import time
-from datetime import datetime, timezone, timedelta
 from authority_runtime import (
     create_envelope,
     generate_key_pair,
@@ -21,7 +19,6 @@ from authority_runtime import (
     EnvelopeStore,
     PermissionDenied,
     InvalidSignature,
-    EnvelopeExpired,
     Skill,
     SkillParameters,
     Authority,
@@ -195,7 +192,7 @@ def test_delegation_chain_with_narrowing():
 
         # Validate narrowing
         validation = validate_envelope(child_envelope, root_envelope, public_key)
-        assert validation["valid"] == True
+        assert validation["valid"] is True
         print("✅ Narrowing validation passed")
 
         # Retrieve chain from DB
@@ -398,7 +395,7 @@ def test_multi_step_workflow_with_audit():
         )
         store.save_envelope(step1_envelope)
 
-        user_data = secure_read(user_id="user-123", _envelope=step1_envelope)
+        secure_read(user_id="user-123", _envelope=step1_envelope)
         audit1 = create_audit_entry(
             action="read_user",
             envelope=step1_envelope,
@@ -431,7 +428,7 @@ def test_multi_step_workflow_with_audit():
         )
         store.save_envelope(step2_envelope)
 
-        update_result = secure_update(user_id="user-123", bio="Updated bio", _envelope=step2_envelope)
+        secure_update(user_id="user-123", bio="Updated bio", _envelope=step2_envelope)
         audit2 = create_audit_entry(
             action="update_profile",
             envelope=step2_envelope,
@@ -465,7 +462,7 @@ def test_multi_step_workflow_with_audit():
         )
         store.save_envelope(step3_envelope)
 
-        notify_result = secure_notify(
+        secure_notify(
             user_id="user-123",
             message="Profile updated",
             _envelope=step3_envelope

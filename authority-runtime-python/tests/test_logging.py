@@ -5,9 +5,7 @@ Tests for structured logging configuration (D3).
 import json
 import logging
 import os
-import io
 
-import pytest
 
 
 class TestJSONFormatter:

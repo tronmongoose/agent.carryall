@@ -5,7 +5,7 @@ This module provides comprehensive validation for envelope creation,
 better error messages, and input sanitization.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 import re
 from .types import Authority, AuthorityEnvelope
 

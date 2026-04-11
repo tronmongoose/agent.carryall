@@ -3,7 +3,6 @@ Tests for Authority Envelope system
 """
 
 import pytest
-from datetime import datetime, timedelta
 
 from authority_runtime.envelope import (
     generate_key_pair,

@@ -66,13 +66,13 @@ class TestHTTPAuth:
         """Health endpoints should always be accessible regardless of auth."""
         try:
             from aiohttp import web
-            from aiohttp.test_utils import AioHTTPTestCase, TestClient, TestServer
+            from aiohttp.test_utils import TestClient, TestServer
         except ImportError:
             pytest.skip("aiohttp required for HTTP auth tests")
 
         os.environ["CARRYALL_API_KEY"] = api_key
         try:
-            server = CarryallMCPServer()
+            CarryallMCPServer()
 
             # Build the app manually to test middleware
             @web.middleware

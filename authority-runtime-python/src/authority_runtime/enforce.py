@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from functools import wraps
 
-from .constraints import check_constraints, ConstraintResult
+from .constraints import check_constraints
 from .envelope import verify_signature
 from .types import AuthorityEnvelope
 
@@ -267,10 +267,6 @@ class EnforcedTool:
             ```
         """
         from langchain_core.tools import StructuredTool
-        import inspect
-
-        # Get function signature
-        sig = inspect.signature(self.func)
 
         # Create wrapper that doesn't require _envelope parameter
         # (envelope should be bound in execution context)

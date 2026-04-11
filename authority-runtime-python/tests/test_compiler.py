@@ -31,7 +31,6 @@ from authority_runtime.types import (
     SkillParameters,
     SkillSelection,
     TokenMetrics,
-    AuthorityEnvelope,
     ExecutionConfig,
 )
 from authority_runtime.envelope import create_envelope, generate_key_pair
@@ -653,7 +652,7 @@ class TestRoleAwareCompiler:
             parameters=SkillParameters(allowed=["vault:finance:read"], constraints={}),
         )
 
-        selection = asyncio.get_event_loop().run_until_complete(
+        asyncio.get_event_loop().run_until_complete(
             compiler.select_skill(
                 user_request="some ambiguous request",
                 current_step=1,

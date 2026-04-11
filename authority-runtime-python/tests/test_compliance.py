@@ -6,7 +6,7 @@ import os
 import tempfile
 import pytest
 
-from authority_runtime.envelope import create_simple_envelope, create_envelope, generate_key_pair
+from authority_runtime.envelope import create_envelope, generate_key_pair
 from authority_runtime.enforce import create_audit_entry
 from authority_runtime.storage import EnvelopeStore
 from authority_runtime.compliance import ComplianceReport

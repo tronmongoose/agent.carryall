@@ -6,7 +6,7 @@ and integration with check_envelope().
 """
 
 import pytest
-from authority_runtime.constraints import check_constraints, ConstraintResult
+from authority_runtime.constraints import check_constraints
 from authority_runtime.enforce import (
     check_envelope,
     ConstraintViolation,

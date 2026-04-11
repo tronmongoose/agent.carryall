@@ -210,7 +210,7 @@ class TestWriteDocument:
         assert "New Student Enrollment" in titles
 
     def test_write_to_new_vault(self, backend):
-        result = backend.write_document(
+        backend.write_document(
             domain="new-vault",
             content="# Test",
             metadata={"title": "Test Doc"},

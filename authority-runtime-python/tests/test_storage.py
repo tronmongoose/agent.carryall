@@ -5,7 +5,6 @@ Test suite for EnvelopeStore persistence layer
 
 import os
 import tempfile
-from datetime import datetime, timezone, timedelta
 from authority_runtime import (
     create_envelope,
     generate_key_pair,
@@ -206,7 +205,7 @@ def test_decision_context_persistence():
         )
 
         store.save_envelope(envelope)
-        print(f"✅ Saved envelope with decision context")
+        print("✅ Saved envelope with decision context")
 
         # Retrieve and verify decision context
         retrieved = store.get_envelope(envelope.envelope_id)
@@ -216,7 +215,7 @@ def test_decision_context_persistence():
         assert retrieved.decision_context.confidence == 0.95
         assert "Free tier deletion policy" in retrieved.decision_context.constraints_applied
         assert "Soft delete" in retrieved.decision_context.alternatives_considered
-        print(f"✅ Retrieved decision context:")
+        print("✅ Retrieved decision context:")
         print(f"   - Intent: {retrieved.decision_context.intent}")
         print(f"   - Confidence: {retrieved.decision_context.confidence}")
         print(f"   - Constraints: {len(retrieved.decision_context.constraints_applied)}")
@@ -278,7 +277,7 @@ def test_audit_trail_persistence():
         assert len(trail) == 1
         assert trail[0]["action"] == "read_sensitive_data"
         assert trail[0]["result"] == "success"
-        assert trail[0]["signature_valid"] == True
+        assert trail[0]["signature_valid"] is True
         assert trail[0]["resource"] == "file-123"
         print(f"✅ Retrieved audit trail: {len(trail)} entries")
         print(f"   - Action: {trail[0]['action']}")
@@ -345,7 +344,7 @@ def test_statistics():
         assert stats["audit_trail"]["successful"] == 2  # indices 0 and 2
         assert stats["audit_trail"]["blocked"] == 1  # index 1
 
-        print(f"✅ Statistics:")
+        print("✅ Statistics:")
         print(f"   - Total envelopes: {stats['envelopes']['total']}")
         print(f"   - Unique agents: {stats['envelopes']['unique_agents']}")
         print(f"   - Unique policies: {stats['envelopes']['unique_policies']}")

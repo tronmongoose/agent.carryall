@@ -22,7 +22,6 @@ Commands:
 
 import json
 import os
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -32,12 +31,12 @@ from rich.console import Console
 from rich.table import Table
 
 from .keys import AgentKeyStore
-from .envelope import create_simple_envelope, generate_key_pair, verify_signature
+from .envelope import create_simple_envelope
 from .storage import EnvelopeStore
 from .compliance import ComplianceReport
 from .policy import PolicyEngine, PolicyValidationError
 from .types import AuthorityEnvelope
-from .backends.slos import SlosBackend, Decision, parse_slos_uri
+from .backends.slos import SlosBackend, Decision
 
 # Initialize Typer app
 app = typer.Typer(
@@ -239,7 +238,7 @@ def keys_list():
 
     if not agents:
         console.print("No agent keys found.")
-        console.print(f"Generate one with: carryall keys generate <agent-id>")
+        console.print("Generate one with: carryall keys generate <agent-id>")
         return
 
     table = Table(title="Agent Keys")
@@ -544,8 +543,8 @@ def backends_inspect(
 
         try:
             vaults = slos.list_vaults("executive-agent", mock=mock)
-            console.print(f"[bold]Backend:[/bold] Sovereign Life OS")
-            console.print(f"[bold]Vaults:[/bold]")
+            console.print("[bold]Backend:[/bold] Sovereign Life OS")
+            console.print("[bold]Vaults:[/bold]")
             for vault in vaults:
                 console.print(f"  - {vault}")
         except FileNotFoundError as e:
@@ -1087,7 +1086,7 @@ def compliance_summary(
         return
 
     summary = result["summary"]
-    console.print(f"\n[bold]Compliance Summary[/bold]")
+    console.print("\n[bold]Compliance Summary[/bold]")
 
     table = Table()
     table.add_column("Metric", style="cyan")
@@ -1261,7 +1260,7 @@ def db_status():
     version = store.get_schema_version()
     latest = MIGRATIONS[-1][0] if MIGRATIONS else 0
 
-    console.print(f"\n[bold]Database Status[/bold]")
+    console.print("\n[bold]Database Status[/bold]")
     console.print(f"Path: {db_path}")
     console.print(f"Schema version: {version}")
     console.print(f"Latest available: {latest}")
@@ -1269,7 +1268,7 @@ def db_status():
     if version < latest:
         console.print(f"[yellow]Pending migrations: {latest - version}[/yellow]")
     else:
-        console.print(f"[green]All migrations applied.[/green]")
+        console.print("[green]All migrations applied.[/green]")
 
     history = store.get_migration_history()
     if history:

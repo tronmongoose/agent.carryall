@@ -4,7 +4,6 @@ Core types for Authority Runtime - Python port of TypeScript types
 
 from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from datetime import datetime
 import re
 
 

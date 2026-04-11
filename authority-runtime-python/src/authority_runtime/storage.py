@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Generator
 from pathlib import Path
 
-from .types import AuthorityEnvelope, DecisionContext
+from .types import AuthorityEnvelope
 from .enforce import AuditEntry
 
 logger = logging.getLogger(__name__)

@@ -14,11 +14,8 @@ Covers:
 import base64
 import json
 import tempfile
-from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
-import nacl.signing
-import nacl.encoding
 import pytest
 
 from authority_runtime.backends.slos import (
@@ -29,7 +26,6 @@ from authority_runtime.backends.slos import (
     parse_slos_uri,
 )
 from authority_runtime.keys import AgentKeyStore
-from authority_runtime.types import Authority
 
 
 # =============================================================================
@@ -373,7 +369,6 @@ class TestCallMcpErrors:
                 backend._call_mcp("test_method", {}, "test-agent")
 
     def test_nonzero_exit_raises(self, backend):
-        import subprocess
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Something went wrong"

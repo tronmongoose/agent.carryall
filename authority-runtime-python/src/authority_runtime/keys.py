@@ -7,7 +7,6 @@ Keys are stored as 32-byte seeds in files with 0o600 permissions.
 import os
 import base64
 from pathlib import Path
-from typing import Optional
 
 import nacl.signing
 import nacl.encoding

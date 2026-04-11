@@ -272,7 +272,7 @@ class CarryallShell:
         console.print(f"[bold]Agent:[/bold] {self.agent_id}")
         console.print(f"[bold]Envelope:[/bold] {self.envelope.envelope_id}")
         console.print(f"[bold]Expires:[/bold] {self.envelope.expires_at}")
-        console.print(f"[bold]Scopes:[/bold]")
+        console.print("[bold]Scopes:[/bold]")
         for scope in self.envelope.authority.scopes:
             console.print(f"  - {scope}")
 
@@ -351,7 +351,7 @@ class CarryallShell:
             console.print(f"[dim]--- Mock content for {vault}/{doc_id} ---[/dim]")
             console.print(f"Document: {doc_id}")
             console.print(f"Vault: {vault}")
-            console.print(f"[dim]--- (Connect real SLOS for actual content) ---[/dim]")
+            console.print("[dim]--- (Connect real SLOS for actual content) ---[/dim]")
         else:
             console.print("[dim]Real SLOS read not yet connected[/dim]")
 

@@ -14,7 +14,7 @@ Usage:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import yaml
 
@@ -157,7 +157,7 @@ class PolicyEngine:
 
         if errors:
             raise PolicyValidationError(
-                f"Policy validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+                "Policy validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
             )
 
     def get_agent_policy(self, agent_id: str) -> AgentPolicy:
