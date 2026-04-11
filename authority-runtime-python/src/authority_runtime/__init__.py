@@ -58,6 +58,12 @@ except ImportError:
     create_authority_node = None
     create_authority_graph = None
 
+from .vault_scope import (
+    VaultScope,
+    create_vault_envelope,
+    check_vault_access,
+    enforce_envelope,
+)
 from .keys import AgentKeyStore
 from .backends.slos import (
     SlosBackend,
@@ -118,6 +124,11 @@ __all__ = [
     "create_authority_graph",
     # Key management
     "AgentKeyStore",
+    # Vault-scoped enforcement (multi-tenant)
+    "VaultScope",
+    "create_vault_envelope",
+    "check_vault_access",
+    "enforce_envelope",
     # Backends
     "SlosBackend",
     "MemoryBackend",

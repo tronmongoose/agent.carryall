@@ -36,8 +36,8 @@ class Authority(BaseModel):
         - namespace:resource:action (e.g., 'vault:finance:read', 'wallet:transfer')
         - wildcard support (e.g., 'vault:*:read', 'read:*')
         """
-        # Allow alphanumeric, underscore, hyphen, asterisk, separated by colons
-        scope_pattern = re.compile(r'^[a-z0-9_*-]+(?::[a-z0-9_*-]+)+$')
+        # Allow alphanumeric, underscore, hyphen, asterisk, dot, slash, separated by colons
+        scope_pattern = re.compile(r'^[a-zA-Z0-9_./*-]+(?::[a-zA-Z0-9_./*-]+)+$')
         for scope in v:
             if not scope_pattern.match(scope):
                 raise ValueError(
