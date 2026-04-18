@@ -17,7 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from .slos import Decision, PolicyResult, DocumentMetadata, parse_slos_uri
+from .base import Decision, PolicyResult, DocumentMetadata
+from .slos import parse_slos_uri
 
 
 class MemoryBackend:

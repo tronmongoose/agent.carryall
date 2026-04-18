@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "authority-runtime"
-version = "0.3.0"
+version = "0.4.0"
 description = "IAM + Context Control Plane for AI Agents — cryptographic policy enforcement with Ed25519 signed envelopes"
 readme = "README.md"
 authors = [
@@ -39,6 +39,10 @@ dependencies = [
 
 [project.scripts]
 carryall = "authority_runtime.cli:app"
+
+[project.entry-points."authority_runtime.backends"]
+memory = "authority_runtime.backends.memory:MemoryBackend"
+slos = "authority_runtime.backends.slos:SlosBackend"
 
 [project.optional-dependencies]
 llm = [

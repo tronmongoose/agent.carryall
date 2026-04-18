@@ -58,6 +58,45 @@ check_envelope(envelope, public_key, required_scope="delete:users")
 
 See [docs/QUICKSTART.md](docs/QUICKSTART.md) for more examples including `EnforcedTool` runtime blocking and HTML compliance reports.
 
+### Zero-dependency quickstart (no API key, no network)
+
+For evaluation, CI, and offline work, pair `MemoryBackend` with `FakeCompiler` to exercise the full intent → compiled scopes → signed envelope → access check loop without any LLM provider:
+
+```bash
+pip install authority-runtime
+python examples/quickstart_memory.py
+```
+
+`FakeCompiler` is a deterministic, rule-based implementation of `LLMCompiler` — it maps keywords in the intent to scopes that must already be in the parent's authority, with the same subset-enforcement guarantees as the OpenAI/Anthropic compilers. Use it as the default compiler in tests and CI.
+
+### Pluggable backends
+
+`authority_runtime.backends.Backend` is a `runtime_checkable` Protocol. `MemoryBackend` and `SlosBackend` implement it; third parties can ship their own (e.g. a ConductorOne Baton adapter) by implementing the seven methods and registering an entry point:
+
+```toml
+# pyproject.toml of the adapter package
+[project.entry-points."authority_runtime.backends"]
+baton = "carryall_baton.backend:BatonBackend"
+```
+
+Load a backend from a config file:
+
+```json
+{
+  "backend": "baton",
+  "init": { "c1z_path": "./sync.c1z" }
+}
+```
+
+```bash
+export CARRYALL_SLOS_CONFIG=./backend.json
+```
+
+```python
+from authority_runtime.backends import load_backend
+backend = load_backend()  # honors CARRYALL_SLOS_CONFIG, defaults to MemoryBackend
+```
+
 ---
 
 ## What It Does

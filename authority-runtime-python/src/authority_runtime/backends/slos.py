@@ -12,46 +12,15 @@ import base64
 import logging
 import subprocess
 from datetime import datetime, timezone
-from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Optional, Any
 
 
 from ..keys import AgentKeyStore
 from ..crypto import encrypt_document, decrypt_document, is_encrypted
+from .base import Decision, PolicyResult, DocumentMetadata
 
 logger = logging.getLogger(__name__)
-
-
-class Decision(Enum):
-    """Policy evaluation result."""
-    ALLOW = "allow"
-    DENY = "deny"
-    REQUIRE_APPROVAL = "require_approval"
-
-
-@dataclass
-class PolicyResult:
-    """Result of policy evaluation."""
-    decision: Decision
-    reason: str
-    metadata: dict
-
-    def __str__(self) -> str:
-        return f"{self.decision.value.upper()}: {self.reason}"
-
-
-@dataclass
-class DocumentMetadata:
-    """SLOS document metadata from frontmatter."""
-    uri: str
-    id: str
-    domain: list[str]
-    sensitivity: str
-    allowed_agents: list[str]
-    denied_agents: list[str]
-    requires_approval: list[str]
 
 
 def parse_slos_uri(uri: str) -> tuple[str, str]:
