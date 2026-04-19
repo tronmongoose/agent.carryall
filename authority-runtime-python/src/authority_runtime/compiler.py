@@ -494,6 +494,88 @@ class AnthropicCompiler(LLMCompiler):
         )
 
 
+class FakeCompiler(LLMCompiler):
+    """
+    Deterministic compiler for tests, CI, and offline quickstarts.
+
+    Picks the first ``available_skill`` as the selected skill and returns
+    scopes chosen by a simple keyword-to-scope mapping against the parent's
+    available scopes. No LLM, no API key, no network.
+
+    Use via::
+
+        compiler = FakeCompiler(
+            keyword_map={"finance": ["vault:finance:read"], "audit": ["audit:read"]},
+        )
+
+    If the ``user_request`` mentions any mapped keyword (case-insensitive) and
+    the mapped scopes are a subset of ``available_scopes``, those scopes are
+    returned. Otherwise the compiler falls back to the first ``:read`` scope in
+    ``available_scopes``, or an empty scope list if none exist.
+    """
+
+    def __init__(
+        self,
+        keyword_map: Optional[Dict[str, List[str]]] = None,
+        default_scopes: Optional[List[str]] = None,
+        confidence: float = 1.0,
+    ):
+        super().__init__(model="fake", api_key=None)
+        self.keyword_map = {k.lower(): v for k, v in (keyword_map or {}).items()}
+        self.default_scopes = default_scopes
+        self.confidence = confidence
+
+    async def select_skill(
+        self,
+        user_request: str,
+        current_step: int,
+        parent_authority: Authority,
+        available_context_fields: List[str],
+        available_skills: List[Skill],
+        available_scopes: List[str],
+        temperature: float = 0.0,
+    ) -> SkillSelection:
+        if not available_skills:
+            raise ValueError("FakeCompiler requires at least one available skill")
+
+        selected_skill = available_skills[0]
+        available_set = set(available_scopes)
+        request_lower = user_request.lower()
+
+        chosen: List[str] = []
+        matched_keywords: List[str] = []
+        for keyword, scopes in self.keyword_map.items():
+            if keyword in request_lower:
+                matched_keywords.append(keyword)
+                for scope in scopes:
+                    if scope in available_set and scope not in chosen:
+                        chosen.append(scope)
+
+        if not chosen:
+            if self.default_scopes is not None:
+                chosen = [s for s in self.default_scopes if s in available_set]
+            else:
+                read_scopes = [s for s in available_scopes if s.endswith(":read")]
+                if read_scopes:
+                    chosen = [read_scopes[0]]
+
+        included_context = available_context_fields[:1] if available_context_fields else []
+
+        reasoning = (
+            f"FakeCompiler matched keywords {matched_keywords} to scopes {chosen}"
+            if matched_keywords
+            else f"FakeCompiler default selection: {chosen}"
+        )
+
+        return SkillSelection(
+            selected_skill=selected_skill,
+            required_scopes=chosen,
+            required_context_fields=included_context,
+            reasoning=reasoning,
+            confidence=self.confidence,
+        )
+
+
 class RoleAwareCompiler:
     """
     A compiler that uses the role system for fast matching before falling back to LLM.

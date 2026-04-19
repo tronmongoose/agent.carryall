@@ -13,11 +13,12 @@ from .envelope import (
     verify_signature,
 )
 try:
-    from .compiler import LLMCompiler, OpenAICompiler, AnthropicCompiler
+    from .compiler import LLMCompiler, OpenAICompiler, AnthropicCompiler, FakeCompiler
 except ImportError:
     LLMCompiler = None
     OpenAICompiler = None
     AnthropicCompiler = None
+    FakeCompiler = None
 
 from .types import (
     Skill,
@@ -65,16 +66,18 @@ from .vault_scope import (
     enforce_envelope,
 )
 from .keys import AgentKeyStore
-from .backends.slos import (
+from .backends import (
+    Backend,
     SlosBackend,
+    MemoryBackend,
     Decision,
     PolicyResult,
     DocumentMetadata,
-    parse_slos_uri,
+    load_backend,
 )
-from .backends.memory import MemoryBackend
+from .backends.slos import parse_slos_uri
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # Envelope core
@@ -88,6 +91,7 @@ __all__ = [
     "LLMCompiler",
     "OpenAICompiler",
     "AnthropicCompiler",
+    "FakeCompiler",
     # Types
     "Skill",
     "Authority",
@@ -130,10 +134,12 @@ __all__ = [
     "check_vault_access",
     "enforce_envelope",
     # Backends
+    "Backend",
     "SlosBackend",
     "MemoryBackend",
     "Decision",
     "PolicyResult",
     "DocumentMetadata",
     "parse_slos_uri",
+    "load_backend",
 ]
