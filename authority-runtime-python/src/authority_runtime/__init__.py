@@ -36,6 +36,15 @@ from .skill_loader import (
     load_skill,
     enforce_tool_access,
 )
+from .harness_audit import (
+    HarnessAuditor,
+    Finding,
+    AuditError,
+    Rule,
+    RuleRegistry,
+    register_rule,
+    builtin_rules,
+)
 from .enforce import (
     EnforcedTool,
     EnforcedToolkit,
@@ -112,6 +121,14 @@ __all__ = [
     "SkillManifestError",
     "load_skill",
     "enforce_tool_access",
+    # Harness audit framework (port from bjornswarm)
+    "HarnessAuditor",
+    "Finding",
+    "AuditError",
+    "Rule",
+    "RuleRegistry",
+    "register_rule",
+    "builtin_rules",
     # Enforcement (the real value)
     "EnforcedTool",
     "EnforcedToolkit",
