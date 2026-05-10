@@ -126,7 +126,7 @@ class TestArchive:
 class TestVersionConsistency:
     def test_version_in_init(self):
         from authority_runtime import __version__
-        assert __version__ == "0.4.0"
+        assert __version__ == "0.5.0"
 
     def test_version_in_pyproject(self):
         import tomllib
@@ -135,7 +135,7 @@ class TestVersionConsistency:
         )
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
-        assert data["project"]["version"] == "0.4.0"
+        assert data["project"]["version"] == "0.5.0"
 
     @pytest.mark.asyncio
     async def test_version_in_mcp_initialize(self):
@@ -143,4 +143,4 @@ class TestVersionConsistency:
 
         server = CarryallMCPServer()
         result = await server._handle_initialize({})
-        assert result["serverInfo"]["version"] == "0.4.0"
+        assert result["serverInfo"]["version"] == "0.5.0"

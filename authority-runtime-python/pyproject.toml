@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "authority-runtime"
-version = "0.4.0"
+version = "0.5.0"
 description = "IAM + Context Control Plane for AI Agents — cryptographic policy enforcement with Ed25519 signed envelopes"
 readme = "README.md"
 authors = [
