@@ -40,7 +40,10 @@ from .types import (
 from .skill_loader import (
     SkillManifest,
     SkillManifestError,
+    SkillSoul,
+    SkillSoulError,
     load_skill,
+    load_soul,
     enforce_tool_access,
 )
 from .harness_audit import (
@@ -151,7 +154,10 @@ __all__ = [
     # SKILL.md loader (port from bjornswarm)
     "SkillManifest",
     "SkillManifestError",
+    "SkillSoul",
+    "SkillSoulError",
     "load_skill",
+    "load_soul",
     "enforce_tool_access",
     # Harness audit framework (port from bjornswarm)
     "HarnessAuditor",
