@@ -576,6 +576,146 @@ class FakeCompiler(LLMCompiler):
         )
 
 
+class OllamaCompiler(LLMCompiler):
+    """Local Ollama-based policy compiler. Data never leaves the machine."""
+
+    def __init__(
+        self,
+        model: str = "gemma4:26b",
+        base_url: str = "http://localhost:11434",
+    ):
+        super().__init__(model, api_key=None)
+        self.base_url = base_url.rstrip("/")
+        self.default_model = model
+
+    async def select_skill(
+        self,
+        user_request: str,
+        current_step: int,
+        parent_authority: Authority,
+        available_context_fields: List[str],
+        available_skills: List[Skill],
+        available_scopes: List[str],
+        temperature: float = 0.0,
+    ) -> SkillSelection:
+        """Select skill using local Ollama model."""
+
+        import time
+        import aiohttp
+
+        start_time = time.time()
+
+        prompt = self._build_prompt(
+            user_request,
+            current_step,
+            parent_authority,
+            available_context_fields,
+            available_skills,
+            available_scopes,
+        )
+
+        # Use /api/chat for structured output
+        payload = {
+            "model": self.default_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are an AI security system that selects the minimal skill and permissions needed for an agent to complete a task. Always respond with valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": temperature,
+                "num_predict": 2000,  # Gemma 4 uses internal CoT that consumes tokens
+            },
+        }
+
+        url = f"{self.base_url}/api/chat"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=60)
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise ValueError(
+                        f"Ollama returned HTTP {resp.status}: {body[:200]}"
+                    )
+                result = await resp.json()
+
+        latency = int((time.time() - start_time) * 1000)
+
+        content = result.get("message", {}).get("content", "{}")
+
+        # Validate LLM response with Pydantic schema
+        try:
+            validated_response = LLMResponseSchema(**json.loads(content))
+        except (json.JSONDecodeError, ValidationError) as e:
+            raise ValueError(
+                f"Ollama returned invalid response format: {e}. "
+                f"Response was: {content[:200]}"
+            )
+
+        # Track metrics (no cost for local models)
+        eval_count = result.get("eval_count", 0)
+        prompt_eval_count = result.get("prompt_eval_count", 0)
+        self.last_metrics = TokenMetrics(
+            input_tokens=prompt_eval_count,
+            output_tokens=eval_count,
+            total_cost_usd=0.0,
+            latency_ms=latency,
+        )
+
+        # Find selected skill
+        selected_skill = next(
+            (
+                skill
+                for skill in available_skills
+                if skill.id == validated_response.selected_skill_id
+            ),
+            None,
+        )
+
+        if not selected_skill:
+            raise ValueError(
+                f"LLM selected unknown skill: {validated_response.selected_skill_id}. "
+                f"Available skills: {[s.id for s in available_skills]}"
+            )
+
+        # CRITICAL: Validate scopes are within parent's allowed set
+        requested_scopes_set = set(validated_response.required_scopes)
+        available_scopes_set = set(available_scopes)
+
+        if not requested_scopes_set.issubset(available_scopes_set):
+            invalid_scopes = requested_scopes_set - available_scopes_set
+            raise ValueError(
+                f"LLM requested invalid scopes: {invalid_scopes}. "
+                f"This is a security violation - LLM may have been prompt-injected. "
+                f"Available scopes: {available_scopes}"
+            )
+
+        # Validate context fields
+        requested_context_set = set(validated_response.required_context_fields)
+        available_context_set = set(available_context_fields)
+
+        if not requested_context_set.issubset(available_context_set):
+            invalid_context = requested_context_set - available_context_set
+            raise ValueError(
+                f"LLM requested invalid context fields: {invalid_context}. "
+                f"Available fields: {available_context_fields}"
+            )
+
+        return SkillSelection(
+            selected_skill=selected_skill,
+            required_scopes=list(validated_response.required_scopes),
+            required_context_fields=list(validated_response.required_context_fields),
+            reasoning=validated_response.reasoning,
+            confidence=validated_response.confidence,
+        )
+
+
 class RoleAwareCompiler:
     """
     A compiler that uses the role system for fast matching before falling back to LLM.

@@ -51,10 +51,11 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 try:
-    from .compiler import OpenAICompiler, AnthropicCompiler, compile_policy
+    from .compiler import OpenAICompiler, AnthropicCompiler, OllamaCompiler, compile_policy
 except ImportError:
     OpenAICompiler = None
     AnthropicCompiler = None
+    OllamaCompiler = None
     compile_policy = None
 
 
@@ -399,8 +400,8 @@ class CarryallMCPServer:
                             },
                             "llm_provider": {
                                 "type": "string",
-                                "enum": ["openai", "anthropic"],
-                                "description": "LLM provider to use for policy compilation (default: openai)",
+                                "enum": ["openai", "anthropic", "ollama"],
+                                "description": "LLM provider to use for policy compilation. Use 'ollama' for local-only compilation (required for sensitive/finance data). Default: ollama.",
                             },
                         },
                         "required": ["agent_id", "intent", "available_scopes", "available_resources"],
@@ -728,7 +729,7 @@ class CarryallMCPServer:
         available_scopes = arguments.get("available_scopes", [])
         available_resources = arguments.get("available_resources", [])
         ttl_seconds = arguments.get("ttl_seconds", 300)
-        llm_provider = arguments.get("llm_provider", "openai")
+        llm_provider = arguments.get("llm_provider", "ollama")
 
         if not agent_id or not intent:
             raise ValueError("agent_id and intent are required")
@@ -736,16 +737,44 @@ class CarryallMCPServer:
         if not available_scopes:
             raise ValueError("available_scopes cannot be empty")
 
+        # Detect finance-scoped requests — these MUST use local models
+        is_finance_scoped = any("finance" in s for s in available_scopes)
+        if is_finance_scoped and llm_provider not in ("ollama",):
+            logger.warning(
+                "Finance-scoped compile_policy requested with provider '%s' — "
+                "forcing ollama (finance data must stay local)", llm_provider
+            )
+            llm_provider = "ollama"
+
         # Select LLM compiler
-        if llm_provider == "anthropic":
+        if llm_provider == "ollama":
+            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+            ollama_model = os.environ.get("OLLAMA_COMPILER_MODEL", "gemma4:26b")
+            if OllamaCompiler is None:
+                raise PermissionDenied(
+                    "DENIED: Policy compilation unavailable — OllamaCompiler not loaded. "
+                    "Cannot bypass Carryall envelope system. Operation blocked."
+                )
+            compiler = OllamaCompiler(model=ollama_model, base_url=ollama_url)
+        elif llm_provider == "anthropic":
             api_key = os.environ.get("ANTHROPIC_API_KEY")
             if not api_key:
-                raise ValueError("ANTHROPIC_API_KEY environment variable not set")
+                raise PermissionDenied(
+                    "DENIED: ANTHROPIC_API_KEY not available. "
+                    "Cannot compile policy without LLM. "
+                    "Use llm_provider='ollama' for local compilation, "
+                    "or set ANTHROPIC_API_KEY. Operation blocked."
+                )
             compiler = AnthropicCompiler(api_key=api_key)
         else:
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("OPENAI_API_KEY environment variable not set")
+                raise PermissionDenied(
+                    "DENIED: OPENAI_API_KEY not available. "
+                    "Cannot compile policy without LLM. "
+                    "Use llm_provider='ollama' for local compilation, "
+                    "or set OPENAI_API_KEY. Operation blocked."
+                )
             compiler = OpenAICompiler(api_key=api_key)
 
         # Build minimal available skills based on scopes
