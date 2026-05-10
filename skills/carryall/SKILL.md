@@ -1,6 +1,15 @@
 ---
 name: carryall
 description: "AI agent permission management using cryptographic Authority Envelopes. Use carryall tools when agents need minimal permissions, policy compilation from intent, access checks, or audit trails."
+tools:
+  - carryall_compile_policy
+  - carryall_check_access
+  - carryall_list_vaults
+  - carryall_get_metadata
+  - carryall_read_document
+  - carryall_write_document
+  - carryall_query_documents
+  - carryall_audit_log
 ---
 
 # Carryall - Authority Runtime for AI Agents

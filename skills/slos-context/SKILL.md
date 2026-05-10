@@ -1,6 +1,7 @@
 ---
 name: slos-context
 description: Manages persistent agent context — recall conversation history, search across vault interactions, compact old messages into summaries. Use when asked "recall context", "what happened in [vault]", "search context for", "context status", "compact history", or "what did [agent] do".
+tools: []
 ---
 
 # SLOS Context Manager

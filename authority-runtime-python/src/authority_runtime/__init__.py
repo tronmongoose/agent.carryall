@@ -30,6 +30,12 @@ from .types import (
     AuthorityEnvelope,
     DecisionContext,
 )
+from .skill_loader import (
+    SkillManifest,
+    SkillManifestError,
+    load_skill,
+    enforce_tool_access,
+)
 from .enforce import (
     EnforcedTool,
     EnforcedToolkit,
@@ -101,6 +107,11 @@ __all__ = [
     "ExecutionConfig",
     "AuthorityEnvelope",
     "DecisionContext",
+    # SKILL.md loader (port from bjornswarm)
+    "SkillManifest",
+    "SkillManifestError",
+    "load_skill",
+    "enforce_tool_access",
     # Enforcement (the real value)
     "EnforcedTool",
     "EnforcedToolkit",
