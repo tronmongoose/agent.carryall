@@ -45,6 +45,17 @@ from .harness_audit import (
     register_rule,
     builtin_rules,
 )
+from .rule_packs import (
+    Rule as PackRule,
+    RulePack,
+    RulePackError,
+    RuleViolation,
+    Predicate,
+    PredicateRegistry,
+    register_predicate,
+    default_registry,
+    enforces,
+)
 from .enforce import (
     EnforcedTool,
     EnforcedToolkit,
@@ -129,6 +140,16 @@ __all__ = [
     "RuleRegistry",
     "register_rule",
     "builtin_rules",
+    # Rule packs: numbered hard-rule enforcement (port from bjornswarm)
+    "PackRule",
+    "RulePack",
+    "RulePackError",
+    "RuleViolation",
+    "Predicate",
+    "PredicateRegistry",
+    "register_predicate",
+    "default_registry",
+    "enforces",
     # Enforcement (the real value)
     "EnforcedTool",
     "EnforcedToolkit",
