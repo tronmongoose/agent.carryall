@@ -13,12 +13,19 @@ from .envelope import (
     verify_signature,
 )
 try:
-    from .compiler import LLMCompiler, OpenAICompiler, AnthropicCompiler, FakeCompiler
+    from .compiler import (
+        AnthropicCompiler,
+        FakeCompiler,
+        LLMCompiler,
+        OllamaCompiler,
+        OpenAICompiler,
+    )
 except ImportError:
     LLMCompiler = None
     OpenAICompiler = None
     AnthropicCompiler = None
     FakeCompiler = None
+    OllamaCompiler = None
 
 from .types import (
     Skill,
@@ -118,6 +125,7 @@ __all__ = [
     "OpenAICompiler",
     "AnthropicCompiler",
     "FakeCompiler",
+    "OllamaCompiler",
     # Types
     "Skill",
     "Authority",
