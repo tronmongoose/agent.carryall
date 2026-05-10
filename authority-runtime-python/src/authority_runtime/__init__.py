@@ -63,6 +63,19 @@ from .rule_packs import (
     default_registry,
     enforces,
 )
+from .router import (
+    Sensitivity,
+    SensitivityClassifier,
+    NeverSensitiveClassifier,
+    ModelRegistry,
+    Tier,
+    Router,
+    RouteDecision,
+    RouteError,
+    UsageLogger,
+    NullUsageLogger,
+    JsonlUsageLogger,
+)
 from .enforce import (
     EnforcedTool,
     EnforcedToolkit,
@@ -158,6 +171,18 @@ __all__ = [
     "register_predicate",
     "default_registry",
     "enforces",
+    # Router primitive (port from bjornswarm)
+    "Sensitivity",
+    "SensitivityClassifier",
+    "NeverSensitiveClassifier",
+    "ModelRegistry",
+    "Tier",
+    "Router",
+    "RouteDecision",
+    "RouteError",
+    "UsageLogger",
+    "NullUsageLogger",
+    "JsonlUsageLogger",
     # Enforcement (the real value)
     "EnforcedTool",
     "EnforcedToolkit",
