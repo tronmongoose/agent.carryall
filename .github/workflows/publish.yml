@@ -10,9 +10,54 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+      contents: read
+      checks: read
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify CI passed on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="${GITHUB_SHA}"
+          echo "Verifying CI status for $SHA"
+          # Required check-run names. mypy is intentionally excluded — it has a
+          # pre-existing 97-error backlog in foundation modules (see CHANGELOG
+          # "typecheck backlog"); requiring it would permanently block PyPI
+          # publishes until that's worked down.
+          REQUIRED='["test (3.10)","test (3.11)","test (3.12)","test (3.13)","lint"]'
+          # Poll for up to 30 minutes for CI to complete on this SHA.
+          for attempt in {1..60}; do
+            RAW=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs" --paginate)
+            echo "$RAW" | jq -r '.check_runs[] | "  \(.name): \(.status)/\(.conclusion // "pending")"' | sort -u
+            # For each required check, get its latest conclusion (or null if still running).
+            STATES=$(echo "$RAW" | jq -c --argjson req "$REQUIRED" '
+              [ $req[] as $name |
+                ( [.check_runs[] | select(.name == $name)] | sort_by(.completed_at // "") | last ) as $latest |
+                { name: $name, status: ($latest.status // "missing"), conclusion: ($latest.conclusion // null) }
+              ]')
+            FAILED=$(echo "$STATES" | jq -r '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")] | length')
+            MISSING=$(echo "$STATES" | jq -r '[.[] | select(.status == "missing")] | length')
+            PENDING=$(echo "$STATES" | jq -r '[.[] | select(.status != "completed" and .status != "missing")] | length')
+            SUCCEEDED=$(echo "$STATES" | jq -r '[.[] | select(.conclusion == "success")] | length')
+            TOTAL=$(echo "$REQUIRED" | jq -r 'length')
+            if [ "$FAILED" -gt 0 ]; then
+              echo "CI FAILED on $SHA. Required checks:"
+              echo "$STATES" | jq .
+              exit 1
+            fi
+            if [ "$SUCCEEDED" = "$TOTAL" ]; then
+              echo "All required CI checks succeeded on $SHA."
+              exit 0
+            fi
+            echo "Waiting for CI on $SHA (attempt $attempt/60): $SUCCEEDED/$TOTAL succeeded, $PENDING pending, $MISSING missing"
+            sleep 30
+          done
+          echo "Timed out waiting for CI to complete on $SHA after 30 minutes."
+          echo "$STATES" | jq .
+          exit 1
 
       - name: Set up Python
         uses: actions/setup-python@v5
