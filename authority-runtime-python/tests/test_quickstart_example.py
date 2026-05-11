@@ -4,8 +4,6 @@ import asyncio
 import importlib.util
 from pathlib import Path
 
-import pytest
-
 
 def _load_example_module():
     path = Path(__file__).resolve().parent.parent / "examples" / "quickstart_memory.py"

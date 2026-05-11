@@ -1,7 +1,6 @@
 """Tests for the Backend Protocol and load_backend resolver."""
 
 import json
-from pathlib import Path
 
 import pytest
 
