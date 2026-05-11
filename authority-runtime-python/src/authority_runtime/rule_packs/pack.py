@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Optional
+from typing import Any, Iterable, List, Mapping, Optional, cast
 
 import yaml
 
@@ -179,11 +179,15 @@ class RulePack:
                     f"Rule pack at {source}: rule[{i}] must be a mapping"
                 )
             try:
+                # Rule.__post_init__ rejects empty/non-str id and predicate; pass
+                # the raw values through as `str | None` and let the validator
+                # produce the standard error. The cast() keeps mypy happy without
+                # silently coercing — Rule's own validation is authoritative.
                 rules.append(
                     Rule(
-                        id=item.get("id"),
+                        id=cast(str, item.get("id")),
                         description=item.get("description", ""),
-                        predicate=item.get("predicate"),
+                        predicate=cast(str, item.get("predicate")),
                         enforcement=list(item.get("enforcement", [])),
                         number=item.get("number"),
                     )

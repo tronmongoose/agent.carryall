@@ -13,6 +13,19 @@ All notable changes to Authority Runtime are documented here.
 - CI workflow matrix is now `["3.10", "3.11", "3.12", "3.13"]`.
 - `[tool.black]` and `[tool.ruff]` `target-version` bumped to `py310`; `[tool.mypy]` `python_version` bumped to `3.10`.
 
+### Fixed
+
+- `rule_packs/pack.py`: narrowed `cast(str, item.get(...))` for `id` and `predicate` when constructing `Rule` from YAML; `Rule.__post_init__` is still the authoritative validator (rejects empty / non-str values), the casts just keep mypy honest.
+- `tests/test_backends_protocol.py`, `tests/test_quickstart_example.py`: removed unused `Path` / `pytest` imports flagged by ruff F401 since they landed in v0.4.0.
+
+### Dev tooling
+
+- Added `types-PyYAML` to dev extras so mypy has stubs for `yaml` (otherwise `skill_loader.py` and `rule_packs/pack.py` flag `import-untyped`).
+
+### Known issues — typecheck backlog
+
+The `typecheck` CI job has been failing on `main` continuously since at least v0.1.0; this release does **not** clear that backlog. A baseline `mypy src/` reports 97 errors across 14 files in foundation modules (`storage.py`, `langgraph.py`, `cli.py`, `mcp_server.py`, `__init__.py`, etc.) — all pre-existing tech debt, not introduced by recent changes. The publish-gate added in this cycle requires `test` and `lint` to pass on a release commit, but **does not** require `typecheck`, so PyPI publishes are no longer blocked by the legacy mypy backlog while it gets worked down. The new port packages (`skill_loader`, `harness_audit`, `rule_packs`, `router`) are mypy-clean today; that bar should hold for new code.
+
 ## [0.5.0] - 2026-05-10
 
 ### Added — bjornswarm-pattern ports
