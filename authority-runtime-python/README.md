@@ -3,7 +3,7 @@
 **Cryptographic IAM for AI agents** -- scoped, signed, time-limited permissions with a tamper-evident audit trail.
 
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)]()
 
 ---
@@ -196,12 +196,34 @@ Audit Trail (SQLite, hash chain, compliance export)
 
 ## Test Suite
 
-182 tests across 15 test files covering envelope operations, scope matching, constraint enforcement, policy engine, compliance reports, hash chain integrity, schema migrations, MCP auth, and structured logging.
+490 tests covering envelope operations, scope matching, constraint enforcement, policy engine, compliance reports, hash chain integrity, schema migrations, MCP auth, structured logging, and the five v0.5.0 port packages (`skill_loader`, `harness_audit`, `rule_packs`, `router`, `SkillSoul`).
 
 ```bash
 pytest            # Run all tests
 pytest -v -x      # Verbose, stop on first failure
 ```
+
+---
+
+## Local development
+
+The repo ships a `Makefile` at the repo root that mirrors what CI runs — `make check` locally and a green CI on the same commit mean the same thing.
+
+```bash
+make install        # Create authority-runtime-python/.venv and editable-install dev extras
+make lint           # ruff check (CI parity)
+make typecheck      # mypy src/ (CI parity)
+make test           # pytest (CI parity)
+make check          # lint + typecheck + test
+```
+
+Pre-commit hooks catch the lint class of failure *before* CI does:
+
+```bash
+make precommit-install   # one-time: pip install pre-commit && pre-commit install
+```
+
+After that, `git commit` runs `ruff --fix` and `ruff-format` on staged files automatically.
 
 ---
 

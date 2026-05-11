@@ -1,0 +1,18 @@
+# Pre-commit hooks. Install once with:
+#   pip install pre-commit
+#   pre-commit install
+#
+# These hooks run on every `git commit` and catch the class of failures
+# (unused imports, etc.) that have historically slipped through to CI.
+# They do NOT run mypy — type-checking is too slow / env-dependent for a
+# commit hook. Mypy stays a CI + `make typecheck` gate.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.0  # pinned; bump deliberately
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^authority-runtime-python/(src|tests)/
+      - id: ruff-format
+        files: ^authority-runtime-python/(src|tests)/
