@@ -2,6 +2,17 @@
 
 All notable changes to Authority Runtime are documented here.
 
+## [Unreleased]
+
+### Breaking
+
+- **Dropped Python 3.9 support.** `requires-python` is now `>=3.10`. Python 3.9 reached end-of-life 2025-10-31; modern dev dependencies (`langchain>=1.0`, `langgraph>=0.2`) no longer support it, and the `test (3.9)` CI job had been failing with `pip resolution-too-deep` errors since those deps landed. Supported versions are now 3.10 / 3.11 / 3.12 / 3.13.
+
+### Changed
+
+- CI workflow matrix is now `["3.10", "3.11", "3.12", "3.13"]`.
+- `[tool.black]` and `[tool.ruff]` `target-version` bumped to `py310`; `[tool.mypy]` `python_version` bumped to `3.10`.
+
 ## [0.5.0] - 2026-05-10
 
 ### Added — bjornswarm-pattern ports

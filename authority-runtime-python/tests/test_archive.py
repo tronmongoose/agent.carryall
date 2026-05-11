@@ -4,6 +4,7 @@ Tests for audit archive, export, and version alignment (D4).
 
 import os
 import sqlite3
+import sys
 import tempfile
 import pytest
 from datetime import datetime, timezone, timedelta
@@ -128,6 +129,10 @@ class TestVersionConsistency:
         from authority_runtime import __version__
         assert __version__ == "0.5.0"
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 11),
+        reason="tomllib is stdlib only on Python 3.11+",
+    )
     def test_version_in_pyproject(self):
         import tomllib
         pyproject_path = os.path.join(
