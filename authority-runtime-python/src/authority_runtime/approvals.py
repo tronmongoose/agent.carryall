@@ -44,6 +44,7 @@ class ApprovalQueue:
         target_domain: Optional[str] = None,
         fields_needed: Optional[list[str]] = None,
         ttl_seconds: int = 86400,
+        auto_deny_seconds: Optional[int] = None,
     ) -> str:
         """
         Create a pending approval request.
@@ -56,6 +57,9 @@ class ApprovalQueue:
             target_domain: Target vault domain
             fields_needed: Specific fields requested (optional)
             ttl_seconds: Time to live before auto-expiry (default 24h)
+            auto_deny_seconds: If set, transitions to "denied" after this many
+                seconds with no human decision. Must be < ttl_seconds.
+                Default None preserves legacy behaviour (TTL -> "expired").
 
         Returns:
             Request ID (UUIDv7-style)
@@ -79,6 +83,9 @@ class ApprovalQueue:
             "expires_at": (now + timedelta(seconds=ttl_seconds)).isoformat(),
             "status": "pending",
         }
+
+        if auto_deny_seconds is not None and auto_deny_seconds < ttl_seconds:
+            record["auto_deny_at"] = (now + timedelta(seconds=auto_deny_seconds)).isoformat()
 
         if fields_needed:
             record["fields_needed"] = fields_needed
@@ -147,12 +154,39 @@ class ApprovalQueue:
         logger.info(f"Approval request {request_id} {decision} by {decided_by}: {reason}")
         return True
 
+    def _maybe_auto_transition(self, record: dict, path: Path) -> dict:
+        """Auto-transition a pending record to "denied" or "expired" if due.
+
+        "denied" takes precedence over "expired" — auto_deny_at is always
+        earlier than expires_at when both are set, and a timeout-deny is a
+        stronger statement than a TTL expiry.
+        """
+        if record.get("status") != "pending":
+            return record
+        now = datetime.now(timezone.utc)
+        auto_deny_at = record.get("auto_deny_at")
+        if auto_deny_at and now > datetime.fromisoformat(auto_deny_at):
+            record["status"] = "denied"
+            record["decided_at"] = now.isoformat()
+            record["decided_by"] = "auto-deny"
+            record["decision_reason"] = "auto-denied: no human decision before auto_deny_at"
+            with open(path, "w") as f:
+                yaml.dump(record, f, default_flow_style=False, sort_keys=False)
+            return record
+        expires_at = datetime.fromisoformat(record["expires_at"])
+        if now > expires_at:
+            record["status"] = "expired"
+            with open(path, "w") as f:
+                yaml.dump(record, f, default_flow_style=False, sort_keys=False)
+        return record
+
     def check(self, request_id: str) -> Optional[dict]:
         """
         Check the status of an approval request.
 
         Returns:
-            Record dict if found, None otherwise. Auto-expires stale requests.
+            Record dict if found, None otherwise. Auto-transitions stale
+            requests to "denied" (if auto_deny_at passed) or "expired".
         """
         path = self._request_path(request_id)
         if not path.exists():
@@ -161,20 +195,17 @@ class ApprovalQueue:
         with open(path) as f:
             record = yaml.safe_load(f)
 
-        # Auto-expire
-        if record.get("status") == "pending":
-            expires_at = datetime.fromisoformat(record["expires_at"])
-            if datetime.now(timezone.utc) > expires_at:
-                record["status"] = "expired"
-                with open(path, "w") as f:
-                    yaml.dump(record, f, default_flow_style=False, sort_keys=False)
-
-        return record
+        return self._maybe_auto_transition(record, path)
 
     def is_approved(self, request_id: str) -> bool:
         """Check if a specific request has been approved."""
         record = self.check(request_id)
         return record is not None and record.get("status") == "approved"
+
+    def is_denied(self, request_id: str) -> bool:
+        """Check if a specific request has been denied (by human or auto-deny)."""
+        record = self.check(request_id)
+        return record is not None and record.get("status") == "denied"
 
     def find_approved(
         self,
@@ -210,22 +241,15 @@ class ApprovalQueue:
         return None
 
     def list_pending(self) -> list[dict]:
-        """List all pending (non-expired) approval requests."""
+        """List all pending (non-expired, non-auto-denied) approval requests."""
         pending = []
-        now = datetime.now(timezone.utc)
         for path in sorted(self.approvals_dir.glob("*.yaml")):
             try:
                 with open(path) as f:
                     record = yaml.safe_load(f)
+                record = self._maybe_auto_transition(record, path)
                 if record.get("status") == "pending":
-                    expires_at = datetime.fromisoformat(record["expires_at"])
-                    if now <= expires_at:
-                        pending.append(record)
-                    else:
-                        # Auto-expire
-                        record["status"] = "expired"
-                        with open(path, "w") as f:
-                            yaml.dump(record, f, default_flow_style=False, sort_keys=False)
+                    pending.append(record)
             except Exception:
                 continue
         return pending
@@ -245,23 +269,29 @@ class ApprovalQueue:
                 continue
         return history
 
-    def expire_stale(self) -> int:
-        """Mark all expired pending requests. Returns count of newly expired."""
-        count = 0
-        now = datetime.now(timezone.utc)
+    def expire_stale(self) -> dict[str, int]:
+        """Run auto-transitions across all pending requests.
+
+        Returns a count of newly-transitioned records keyed by terminal
+        status: ``{"denied": N, "expired": M}``.
+        """
+        counts = {"denied": 0, "expired": 0}
         for path in self.approvals_dir.glob("*.yaml"):
             try:
                 with open(path) as f:
                     record = yaml.safe_load(f)
-                if record.get("status") == "pending":
-                    expires_at = datetime.fromisoformat(record["expires_at"])
-                    if now > expires_at:
-                        record["status"] = "expired"
-                        with open(path, "w") as f:
-                            yaml.dump(record, f, default_flow_style=False, sort_keys=False)
-                        count += 1
+                if record.get("status") != "pending":
+                    continue
+                transitioned = self._maybe_auto_transition(record, path)
+                new_status = transitioned.get("status")
+                if new_status in counts:
+                    counts[new_status] += 1
             except Exception:
                 continue
-        if count:
-            logger.info(f"Expired {count} stale approval requests")
-        return count
+        total = counts["denied"] + counts["expired"]
+        if total:
+            logger.info(
+                f"Auto-transitioned {total} stale approval requests "
+                f"(denied={counts['denied']}, expired={counts['expired']})"
+            )
+        return counts

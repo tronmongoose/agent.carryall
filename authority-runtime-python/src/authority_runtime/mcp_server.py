@@ -173,16 +173,43 @@ class CarryallMCPServer:
         # Fallback to generic scope
         return f"access:{action}"
 
-    async def _notify_approval_needed(
-        self,
-        request_id: str,
-        agent_id: str,
-        action: str,
-        resource: str,
-        purpose: str,
-    ) -> None:
+    def _approval_auto_deny_seconds(self) -> Optional[int]:
+        """Read CARRYALL_APPROVAL_AUTO_DENY_SECONDS env var; return None if unset.
+
+        When set, approval requests transition to terminal status "denied"
+        rather than waiting the full TTL for an "expired" transition.
         """
-        Send a Telegram notification for a pending approval request.
+        raw = os.environ.get("CARRYALL_APPROVAL_AUTO_DENY_SECONDS")
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            logger.warning(f"Invalid CARRYALL_APPROVAL_AUTO_DENY_SECONDS={raw!r}; ignoring")
+            return None
+        return value if value > 0 else None
+
+    def _build_approval_summary(
+        self, request_id: str, agent_id: str, action: str, resource: str, purpose: str,
+    ) -> tuple[str, str]:
+        """Build (title, body) strings shared across notification channels."""
+        domain = "unknown"
+        if resource.startswith("slos://vaults/"):
+            domain = resource.replace("slos://vaults/", "").split("/")[0]
+        title = f"Carryall approval required: {agent_id} -> {action} {domain}"
+        body = (
+            f"Agent: {agent_id}\n"
+            f"Action: {action} {domain}\n"
+            f"Resource: {resource}\n"
+            f"Purpose: {purpose}\n"
+            f"Request: {request_id[:8]}..."
+        )
+        return title, body
+
+    async def _notify_telegram(
+        self, request_id: str, agent_id: str, action: str, resource: str, purpose: str,
+    ) -> bool:
+        """Send approval prompt to Telegram. Returns True on at least one successful send.
 
         Uses TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS from environment.
         Non-blocking — failures are logged but don't block the response.
@@ -191,11 +218,7 @@ class CarryallMCPServer:
         chat_ids = os.environ.get("TELEGRAM_CHAT_IDS", "")
 
         if not bot_token or not chat_ids:
-            logger.warning(
-                f"Approval {request_id} queued but Telegram not configured "
-                "(set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS)"
-            )
-            return
+            return False
 
         # Extract domain from resource URI
         domain = "unknown"
@@ -208,8 +231,7 @@ class CarryallMCPServer:
             f"*Action:* {action} `{domain}`\n"
             f"*Resource:* `{resource}`\n"
             f"*Purpose:* {purpose}\n"
-            f"*Request:* `{request_id[:8]}...`\n"
-            f"*Expires:* 24h"
+            f"*Request:* `{request_id[:8]}...`"
         )
 
         # Inline keyboard with approve/deny buttons
@@ -225,6 +247,7 @@ class CarryallMCPServer:
         import aiohttp
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        any_ok = False
         for chat_id in chat_ids.split(","):
             chat_id = chat_id.strip()
             if not chat_id:
@@ -243,8 +266,80 @@ class CarryallMCPServer:
                             logger.warning(f"Telegram notification failed ({resp.status}): {body}")
                         else:
                             logger.info(f"Approval notification sent to chat {chat_id}")
+                            any_ok = True
             except Exception as e:
                 logger.warning(f"Failed to send Telegram notification: {e}")
+        return any_ok
+
+    async def _notify_ntfy(
+        self, request_id: str, agent_id: str, action: str, resource: str, purpose: str,
+    ) -> bool:
+        """Send approval prompt to ntfy. Returns True on successful publish.
+
+        Reads NTFY_URL, NTFY_TOKEN, NTFY_APPROVAL_TOPIC (default ``approvals``)
+        from env. Provides a second channel so a Telegram outage cannot
+        silently freeze the approval queue.
+        """
+        ntfy_url = os.environ.get("NTFY_URL", "").rstrip("/")
+        if not ntfy_url:
+            return False
+        topic = os.environ.get("NTFY_APPROVAL_TOPIC", "approvals")
+        token = os.environ.get("NTFY_TOKEN", "")
+
+        title, body = self._build_approval_summary(
+            request_id, agent_id, action, resource, purpose,
+        )
+
+        import aiohttp
+        headers = {"Title": title, "Priority": "high", "Tags": "lock,carryall,approval"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        publish_url = f"{ntfy_url}/{topic}"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    publish_url,
+                    data=body.encode("utf-8"),
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status >= 300:
+                        text = await resp.text()
+                        logger.warning(f"ntfy notification failed ({resp.status}): {text}")
+                        return False
+                    logger.info(f"Approval notification sent to ntfy topic {topic}")
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to send ntfy notification: {e}")
+            return False
+
+    async def _notify_approval_needed(
+        self,
+        request_id: str,
+        agent_id: str,
+        action: str,
+        resource: str,
+        purpose: str,
+    ) -> None:
+        """Notify human approvers across all configured channels in parallel.
+
+        Telegram and ntfy fire concurrently; whichever channel the human
+        responds on wins. Non-blocking; per-channel failures are logged. If
+        no channel succeeds, a warning is emitted so a queued request is
+        not silently frozen on a single-channel outage.
+        """
+        results = await asyncio.gather(
+            self._notify_telegram(request_id, agent_id, action, resource, purpose),
+            self._notify_ntfy(request_id, agent_id, action, resource, purpose),
+            return_exceptions=True,
+        )
+        telegram_ok = results[0] is True
+        ntfy_ok = results[1] is True
+        if not telegram_ok and not ntfy_ok:
+            logger.warning(
+                f"Approval {request_id} queued but no notification channel succeeded "
+                "(configure TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_IDS or NTFY_URL)"
+            )
 
     async def handle_request(self, request: dict) -> dict:
         """Handle a JSON-RPC request."""
@@ -1027,6 +1122,7 @@ class CarryallMCPServer:
                     action="read",
                     resource_uri=uri,
                     purpose=purpose,
+                    auto_deny_seconds=self._approval_auto_deny_seconds(),
                 )
                 audit_entry = create_audit_entry(
                     action="read_document",
@@ -1142,6 +1238,7 @@ class CarryallMCPServer:
                     resource_uri=resource_uri,
                     purpose=purpose,
                     target_domain=domain,
+                    auto_deny_seconds=self._approval_auto_deny_seconds(),
                 )
                 audit_entry = create_audit_entry(
                     action="write_document",

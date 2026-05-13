@@ -594,6 +594,83 @@ class TestStructuredDenyPayload:
         assert "Re-mint" in data["retry_hint"]
 
 
+class TestApprovalNotificationFanout:
+    @pytest.fixture
+    def attach_caplog(self, caplog):
+        """authority_runtime sets propagate=False, so attach caplog directly."""
+        import logging
+        target = logging.getLogger("authority_runtime.mcp_server")
+        target.addHandler(caplog.handler)
+        target.setLevel(logging.WARNING)
+        yield caplog
+        target.removeHandler(caplog.handler)
+
+    @pytest.mark.asyncio
+    async def test_no_channel_configured_logs_warning(self, server, monkeypatch, attach_caplog):
+        """With neither TELEGRAM_* nor NTFY_URL set, a warning is emitted."""
+        for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_IDS", "NTFY_URL"):
+            monkeypatch.delenv(k, raising=False)
+        await server._notify_approval_needed(
+            "abc12345-xxxx", "test-agent", "read", "slos://vaults/x/y", "purpose",
+        )
+        assert any(
+            "no notification channel succeeded" in r.getMessage()
+            for r in attach_caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_channels_fire_in_parallel(self, server, monkeypatch):
+        """_notify_approval_needed awaits both channel coros, regardless of result."""
+        calls = []
+
+        async def fake_telegram(*a, **k):
+            calls.append("telegram")
+            return False
+
+        async def fake_ntfy(*a, **k):
+            calls.append("ntfy")
+            return True
+
+        monkeypatch.setattr(server, "_notify_telegram", fake_telegram)
+        monkeypatch.setattr(server, "_notify_ntfy", fake_ntfy)
+
+        await server._notify_approval_needed(
+            "rid-1", "agent", "read", "slos://vaults/x/y", "p",
+        )
+        assert sorted(calls) == ["ntfy", "telegram"]
+
+    @pytest.mark.asyncio
+    async def test_telegram_failure_does_not_block_ntfy(self, server, monkeypatch, attach_caplog):
+        """A Telegram exception is caught; ntfy still runs and success is logged."""
+        async def boom(*a, **k):
+            raise RuntimeError("telegram api down")
+
+        async def ntfy_ok(*a, **k):
+            return True
+
+        monkeypatch.setattr(server, "_notify_telegram", boom)
+        monkeypatch.setattr(server, "_notify_ntfy", ntfy_ok)
+
+        await server._notify_approval_needed(
+            "rid-2", "agent", "read", "slos://vaults/x/y", "p",
+        )
+        # ntfy succeeded so no "no channel succeeded" warning
+        assert not any(
+            "no notification channel succeeded" in r.getMessage()
+            for r in attach_caplog.records
+        )
+
+    def test_auto_deny_env_parsing(self, server, monkeypatch):
+        monkeypatch.setenv("CARRYALL_APPROVAL_AUTO_DENY_SECONDS", "3600")
+        assert server._approval_auto_deny_seconds() == 3600
+        monkeypatch.setenv("CARRYALL_APPROVAL_AUTO_DENY_SECONDS", "not-a-number")
+        assert server._approval_auto_deny_seconds() is None
+        monkeypatch.setenv("CARRYALL_APPROVAL_AUTO_DENY_SECONDS", "0")
+        assert server._approval_auto_deny_seconds() is None
+        monkeypatch.delenv("CARRYALL_APPROVAL_AUTO_DENY_SECONDS")
+        assert server._approval_auto_deny_seconds() is None
+
+
 class TestClassifyDenial:
     def test_classify_explicit_deny(self):
         from authority_runtime.enforce import classify_denial
