@@ -42,7 +42,14 @@ from .logging_config import configure_logging
 from .keys import AgentKeyStore
 from .storage import EnvelopeStore
 from .types import AuthorityEnvelope, Skill, Authority, Context
-from .enforce import check_envelope, create_audit_entry, PermissionDenied, InvalidSignature, EnvelopeExpired
+from .enforce import (
+    check_envelope,
+    create_audit_entry,
+    classify_denial,
+    PermissionDenied,
+    InvalidSignature,
+    EnvelopeExpired,
+)
 from .approvals import ApprovalQueue
 from .backends.slos import SlosBackend, Decision
 from .backends.memory import MemoryBackend
@@ -131,6 +138,23 @@ class CarryallMCPServer:
     def _get_public_key(self, agent_id: str) -> str:
         """Get public key for an agent."""
         return self.key_store.get_public_key(agent_id)
+
+    def _denied_from_result(
+        self,
+        result: Any,
+        envelope: AuthorityEnvelope,
+    ) -> PermissionDenied:
+        """Build a structured PermissionDenied from a backend PolicyResult."""
+        classified = classify_denial(result.reason, result.metadata)
+        current_scopes = ", ".join(envelope.authority.scopes) if envelope.authority.scopes else None
+        return PermissionDenied(
+            result.reason,
+            reason_class=classified["reason_class"],
+            current_scope=current_scopes,
+            suggested_scope=classified["suggested_scope"],
+            retry_hint=classified["retry_hint"],
+            metadata=result.metadata,
+        )
 
     def _derive_scope_from_resource(self, resource: str, action: str) -> str:
         """
@@ -251,23 +275,43 @@ class CarryallMCPServer:
 
         except PermissionDenied as e:
             logger.warning("Permission denied", extra={"method": method, "error": str(e)})
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": 403, "message": f"Permission denied: {e}"},
+            error: dict[str, Any] = {
+                "code": 403,
+                "message": f"Permission denied: {e}",
+                "data": e.to_error_data(),
             }
+            return {"jsonrpc": "2.0", "id": request_id, "error": error}
         except InvalidSignature as e:
             logger.warning("Invalid signature", extra={"method": method, "error": str(e)})
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {"code": 401, "message": f"Invalid signature: {e}"},
+                "error": {
+                    "code": 401,
+                    "message": f"Invalid signature: {e}",
+                    "data": {
+                        "reason": str(e),
+                        "reason_class": "INVALID_SIGNATURE",
+                        "retry_hint": (
+                            "Envelope signature failed verification. "
+                            "Re-mint, do not edit the envelope."
+                        ),
+                    },
+                },
             }
         except EnvelopeExpired as e:
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "error": {"code": 401, "message": f"Envelope expired: {e}"},
+                "error": {
+                    "code": 401,
+                    "message": f"Envelope expired: {e}",
+                    "data": {
+                        "reason": str(e),
+                        "reason_class": "ENVELOPE_EXPIRED",
+                        "retry_hint": "Envelope TTL passed. Compile a fresh envelope.",
+                    },
+                },
             }
         except Exception as e:
             return {
@@ -535,7 +579,11 @@ class CarryallMCPServer:
         resource = arguments.get("resource")
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
 
         envelope = self._load_envelope(envelope_data)
 
@@ -579,7 +627,11 @@ class CarryallMCPServer:
         envelope_data = arguments.get("envelope")
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
 
         envelope = self._load_envelope(envelope_data)
 
@@ -614,7 +666,11 @@ class CarryallMCPServer:
         uri = arguments.get("uri")
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
 
         envelope = self._load_envelope(envelope_data)
 
@@ -632,7 +688,7 @@ class CarryallMCPServer:
                 reason=result.reason,
             )
             self.envelope_store.save_audit_entry(audit_entry)
-            raise PermissionDenied(result.reason)
+            raise self._denied_from_result(result, envelope)
 
         if result.decision == Decision.REQUIRE_APPROVAL:
             public_key = self._get_public_key(envelope.agent_id)
@@ -691,13 +747,23 @@ class CarryallMCPServer:
         limit = arguments.get("limit", 100)
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
 
         envelope = self._load_envelope(envelope_data)
 
         # Check for audit:read scope
         if "audit:read" not in envelope.authority.scopes:
-            raise PermissionDenied("Requires audit:read scope")
+            raise PermissionDenied(
+                "Requires audit:read scope",
+                reason_class="AUDIT_SCOPE_MISSING",
+                suggested_scope="audit:read",
+                current_scope=", ".join(envelope.authority.scopes) if envelope.authority.scopes else None,
+                retry_hint="Re-compile an envelope that includes audit:read.",
+            )
 
         entries = self.envelope_store.get_audit_trail(
             agent_id=agent_id_filter,
@@ -753,7 +819,9 @@ class CarryallMCPServer:
             if OllamaCompiler is None:
                 raise PermissionDenied(
                     "DENIED: Policy compilation unavailable — OllamaCompiler not loaded. "
-                    "Cannot bypass Carryall envelope system. Operation blocked."
+                    "Cannot bypass Carryall envelope system. Operation blocked.",
+                    reason_class="LLM_UNAVAILABLE",
+                    retry_hint="Install the ollama extras or switch llm_provider to a configured backend.",
                 )
             compiler = OllamaCompiler(model=ollama_model, base_url=ollama_url)
         elif llm_provider == "anthropic":
@@ -763,7 +831,9 @@ class CarryallMCPServer:
                     "DENIED: ANTHROPIC_API_KEY not available. "
                     "Cannot compile policy without LLM. "
                     "Use llm_provider='ollama' for local compilation, "
-                    "or set ANTHROPIC_API_KEY. Operation blocked."
+                    "or set ANTHROPIC_API_KEY. Operation blocked.",
+                    reason_class="LLM_UNAVAILABLE",
+                    retry_hint="Retry with llm_provider='ollama' or export ANTHROPIC_API_KEY.",
                 )
             compiler = AnthropicCompiler(api_key=api_key)
         else:
@@ -773,7 +843,9 @@ class CarryallMCPServer:
                     "DENIED: OPENAI_API_KEY not available. "
                     "Cannot compile policy without LLM. "
                     "Use llm_provider='ollama' for local compilation, "
-                    "or set OPENAI_API_KEY. Operation blocked."
+                    "or set OPENAI_API_KEY. Operation blocked.",
+                    reason_class="LLM_UNAVAILABLE",
+                    retry_hint="Retry with llm_provider='ollama' or export OPENAI_API_KEY.",
                 )
             compiler = OpenAICompiler(api_key=api_key)
 
@@ -902,7 +974,11 @@ class CarryallMCPServer:
         purpose = arguments.get("purpose", "read")
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
         if not uri:
             raise ValueError("Missing uri parameter")
 
@@ -937,7 +1013,7 @@ class CarryallMCPServer:
                 reason=result.reason,
             )
             self.envelope_store.save_audit_entry(audit_entry)
-            raise PermissionDenied(result.reason)
+            raise self._denied_from_result(result, envelope)
 
         if result.decision == Decision.REQUIRE_APPROVAL:
             # Check if there's an existing approved request for this access
@@ -1031,7 +1107,11 @@ class CarryallMCPServer:
         data_type = arguments.get("data_type", "note")
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
         if not domain:
             raise ValueError("Missing domain parameter")
         if not content:
@@ -1144,7 +1224,11 @@ class CarryallMCPServer:
         limit = arguments.get("limit", 10)
 
         if not envelope_data:
-            raise PermissionDenied("Missing envelope")
+            raise PermissionDenied(
+                "Missing envelope",
+                reason_class="MISSING_ENVELOPE",
+                retry_hint="Compile an envelope via carryall_compile_policy before retrying.",
+            )
         if not domain:
             raise ValueError("Missing domain parameter")
         if not query:

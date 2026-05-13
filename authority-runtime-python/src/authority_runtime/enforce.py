@@ -18,8 +18,49 @@ logger = logging.getLogger(__name__)
 
 
 class PermissionDenied(Exception):
-    """Raised when an action is blocked due to insufficient permissions."""
-    pass
+    """Raised when an action is blocked due to insufficient permissions.
+
+    Carries optional structured fields so MCP clients can surface a useful
+    pivot prompt instead of an opaque error string. ``str(exc)`` still returns
+    the human reason for backward compatibility.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        reason_class: Optional[str] = None,
+        policy_id: Optional[str] = None,
+        current_scope: Optional[str] = None,
+        suggested_scope: Optional[str] = None,
+        retry_hint: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.reason_class = reason_class
+        self.policy_id = policy_id
+        self.current_scope = current_scope
+        self.suggested_scope = suggested_scope
+        self.retry_hint = retry_hint
+        self.metadata = metadata or {}
+
+    def to_error_data(self) -> Dict[str, Any]:
+        """Build the JSON-RPC ``error.data`` payload for this denial."""
+        data: Dict[str, Any] = {"reason": self.reason}
+        if self.reason_class:
+            data["reason_class"] = self.reason_class
+        if self.policy_id:
+            data["policy_id"] = self.policy_id
+        if self.current_scope:
+            data["current_scope"] = self.current_scope
+        if self.suggested_scope:
+            data["suggested_scope"] = self.suggested_scope
+        if self.retry_hint:
+            data["retry_hint"] = self.retry_hint
+        if self.metadata:
+            data["metadata"] = self.metadata
+        return data
 
 
 class EnvelopeExpired(Exception):
@@ -30,6 +71,56 @@ class EnvelopeExpired(Exception):
 class InvalidSignature(Exception):
     """Raised when an envelope's signature doesn't verify."""
     pass
+
+
+_REASON_CLASS_HINTS: Dict[str, str] = {
+    "MISSING_ENVELOPE": "Compile an envelope via carryall_compile_policy before retrying.",
+    "EXPLICIT_DENY": "Document or policy denies this agent. Do not retry under this identity.",
+    "SCOPE_MISSING": "Re-compile an envelope that includes the suggested_scope.",
+    "INVALID_SIGNATURE": "Envelope signature failed verification. Re-mint, do not edit the envelope.",
+    "ENVELOPE_EXPIRED": "Envelope TTL passed. Compile a fresh envelope.",
+    "BACKEND_ERROR": "Backend was unable to authenticate. Check agent key and SLOS reachability.",
+    "LLM_UNAVAILABLE": "Policy compiler unavailable. Switch llm_provider or restore the configured provider.",
+    "AUDIT_SCOPE_MISSING": "Re-compile an envelope that includes audit:read.",
+    "CONSTRAINT_VIOLATION": "Narrow the request to satisfy the violated constraint, or escalate for approval.",
+    "APPROVAL_REQUIRED": "Action requires human approval. Wait for the approval queue, do not retry blindly.",
+}
+
+
+def classify_denial(
+    reason: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Optional[str]]:
+    """Map a backend ``PolicyResult`` (reason + metadata) to structured fields.
+
+    The backend already populates ``metadata.rule`` with one of
+    ``denied_agents`` / ``requires_approval`` / ``allowed_agents`` /
+    ``envelope_scope``. This translates those plus textual cues from the
+    reason string into a stable ``reason_class`` and ``retry_hint`` for the
+    MCP error payload.
+    """
+    md = metadata or {}
+    rule = md.get("rule")
+    suggested_scope = md.get("required_scope") or md.get("scope")
+
+    if rule == "denied_agents":
+        cls = "EXPLICIT_DENY"
+    elif rule == "requires_approval":
+        cls = "APPROVAL_REQUIRED"
+    elif suggested_scope or "No permission" in reason or "requires scope" in reason:
+        cls = "SCOPE_MISSING"
+    elif "Agent key not found" in reason:
+        cls = "BACKEND_ERROR"
+    elif "SLOS rejected" in reason:
+        cls = "BACKEND_ERROR"
+    else:
+        cls = None
+
+    return {
+        "reason_class": cls,
+        "suggested_scope": suggested_scope,
+        "retry_hint": _REASON_CLASS_HINTS.get(cls) if cls else None,
+    }
 
 
 def _scope_matches(granted: str, required: str) -> bool:

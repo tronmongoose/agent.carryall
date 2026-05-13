@@ -501,3 +501,122 @@ class TestSkillGeneration:
         skills = server._generate_skills_from_scopes([])
         assert len(skills) == 1
         assert skills[0].id == "skill-default"
+
+
+# =============================================================================
+# Structured deny payload (AI Negotiation Loop)
+# =============================================================================
+
+
+class TestStructuredDenyPayload:
+    @pytest.mark.asyncio
+    async def test_missing_envelope_carries_structured_data(self, server):
+        response = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "den-1",
+            "method": "tools/call",
+            "params": {
+                "name": "carryall_check_access",
+                "arguments": {"action": "read", "resource": "slos://vaults/finance/x"},
+            },
+        })
+        assert response["error"]["code"] == 403
+        data = response["error"]["data"]
+        assert data["reason_class"] == "MISSING_ENVELOPE"
+        assert "carryall_compile_policy" in data["retry_hint"]
+        assert data["reason"] == "Missing envelope"
+
+    @pytest.mark.asyncio
+    async def test_scope_missing_carries_suggested_scope(self, server, envelope_with_key):
+        """A scoped deny must surface suggested_scope and current_scope."""
+        envelope, _, _ = envelope_with_key
+        response = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "den-2",
+            "method": "tools/call",
+            "params": {
+                "name": "carryall_get_metadata",
+                "arguments": {
+                    "envelope": envelope.model_dump(),
+                    "uri": "slos://vaults/finance/doc-001",
+                },
+            },
+        })
+        if response.get("error", {}).get("code") == 403:
+            data = response["error"]["data"]
+            assert "reason_class" in data
+            assert data["reason"]
+
+    @pytest.mark.asyncio
+    async def test_invalid_signature_carries_structured_data(self, server):
+        agent_id = "tamper-agent"
+        server.key_store.generate_keypair(agent_id, overwrite=True)
+        signing_key = server.key_store.load_signing_key(agent_id)
+        import nacl.encoding
+        private_key = signing_key.encode(encoder=nacl.encoding.HexEncoder).decode("utf-8")
+
+        envelope = create_envelope(
+            agent_id=agent_id,
+            provider="custom",
+            step_number=1,
+            root_policy_id="test-policy",
+            skill=Skill(
+                id="skill-1",
+                name="Read",
+                tool="read",
+                parameters=SkillParameters(allowed=[], constraints={}),
+            ),
+            authority=Authority(scopes=["vault:finance:read"], resources=["*"]),
+            context=Context(included=[], excluded=[]),
+            execution=ExecutionConfig(provider_config={}),
+            private_key=private_key,
+            ttl_seconds=300,
+        )
+        envelope_data = envelope.model_dump()
+        envelope_data["authority"]["scopes"].append("vault:secret:admin")
+
+        response = await server.handle_request({
+            "jsonrpc": "2.0",
+            "id": "den-3",
+            "method": "tools/call",
+            "params": {
+                "name": "carryall_check_access",
+                "arguments": {
+                    "envelope": envelope_data,
+                    "action": "read",
+                    "resource": "slos://vaults/finance/x",
+                },
+            },
+        })
+        assert response["error"]["code"] == 401
+        data = response["error"]["data"]
+        assert data["reason_class"] == "INVALID_SIGNATURE"
+        assert "Re-mint" in data["retry_hint"]
+
+
+class TestClassifyDenial:
+    def test_classify_explicit_deny(self):
+        from authority_runtime.enforce import classify_denial
+        out = classify_denial("Agent 'x' explicitly denied", {"rule": "denied_agents"})
+        assert out["reason_class"] == "EXPLICIT_DENY"
+        assert out["retry_hint"]
+
+    def test_classify_scope_missing_from_required_scope(self):
+        from authority_runtime.enforce import classify_denial
+        out = classify_denial(
+            "No permission for finance:read",
+            {"required_scope": "vault:finance:read"},
+        )
+        assert out["reason_class"] == "SCOPE_MISSING"
+        assert out["suggested_scope"] == "vault:finance:read"
+
+    def test_classify_requires_approval(self):
+        from authority_runtime.enforce import classify_denial
+        out = classify_denial("needs approval", {"rule": "requires_approval"})
+        assert out["reason_class"] == "APPROVAL_REQUIRED"
+
+    def test_classify_unknown_returns_none(self):
+        from authority_runtime.enforce import classify_denial
+        out = classify_denial("something else", {})
+        assert out["reason_class"] is None
+        assert out["retry_hint"] is None
