@@ -465,3 +465,83 @@ class TestMCPConfig:
         assert result.exit_code == 0
         assert "mcpServers" in result.output
         assert "carryall" in result.output
+
+
+# =============================================================================
+# carryall doctor
+# =============================================================================
+
+
+class TestDoctor:
+    def _isolated_env(self, tmpdir: str) -> dict[str, str]:
+        """Doctor reads keys/db/approvals paths from env. Point them all into
+        a tmpdir so the test isn't polluted by the real ~/.carryall."""
+        base = Path(tmpdir)
+        return {
+            "CARRYALL_KEYS_DIR": str(base / "keys"),
+            "CARRYALL_DB": str(base / "authority.db"),
+            "CARRYALL_APPROVALS_DIR": str(base / "approvals"),
+            # Explicitly UNset the SLOS config so we get a deterministic WARN
+            # rather than picking up the developer's real path.
+            "CARRYALL_SLOS_CONFIG": "",
+        }
+
+    def test_doctor_warns_when_keys_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._isolated_env(tmpdir)
+            result = runner.invoke(app, ["doctor"], env=env)
+            # Missing keys dir is a FAIL → exit code 1
+            assert result.exit_code == 1
+            assert "FAIL" in result.output
+            assert "does not exist" in result.output
+
+    def test_doctor_passes_with_isolated_setup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._isolated_env(tmpdir)
+            # Bootstrap: create a key so the keys check passes
+            runner.invoke(app, ["keys", "generate", "test-agent"], env=env)
+            # And approvals dir
+            Path(env["CARRYALL_APPROVALS_DIR"]).mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["doctor"], env=env)
+            assert result.exit_code == 0  # PASSes and WARNs are non-fatal
+            assert "all 0o600" in result.output
+
+    def test_doctor_fails_on_wrong_key_perms(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = self._isolated_env(tmpdir)
+            runner.invoke(app, ["keys", "generate", "test-agent"], env=env)
+            keys_dir = Path(env["CARRYALL_KEYS_DIR"])
+            key_file = next(keys_dir.glob("*.key"))
+            key_file.chmod(0o644)
+            result = runner.invoke(app, ["doctor"], env=env)
+            assert result.exit_code == 1
+            assert "wrong perms" in result.output
+
+
+# =============================================================================
+# carryall explain
+# =============================================================================
+
+
+class TestExplain:
+    def test_explain_missing_credential_file(self):
+        result = runner.invoke(app, [
+            "explain",
+            "--credential", "/nonexistent.json",
+            "--action", "read",
+            "--resource", "slos://vaults/finance/x",
+        ])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_explain_rejects_non_slos_uri(self, tmp_path):
+        cred = tmp_path / "cred.json"
+        cred.write_text("{}")  # body is irrelevant — URI is checked first
+        result = runner.invoke(app, [
+            "explain",
+            "--credential", str(cred),
+            "--action", "read",
+            "--resource", "https://example.com/x",
+        ])
+        assert result.exit_code == 1
+        assert "Unknown resource URI scheme" in result.output

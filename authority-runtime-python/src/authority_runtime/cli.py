@@ -203,6 +203,199 @@ def test(
 
 
 # =============================================================================
+# Health check + policy dry-run
+# =============================================================================
+
+
+def _check_keys_dir() -> tuple[str, str]:
+    """Returns ("PASS"|"WARN"|"FAIL", detail). Key files must be 0o600."""
+    keys_dir = Path(get_keys_dir()).expanduser()
+    if not keys_dir.exists():
+        return "FAIL", f"{keys_dir} does not exist (run `carryall init`)"
+    key_files = list(keys_dir.glob("*.key"))
+    if not key_files:
+        return "WARN", f"{keys_dir} present but contains no .key files"
+    bad_perms: list[str] = []
+    for kf in key_files:
+        mode = kf.stat().st_mode & 0o777
+        if mode != 0o600:
+            bad_perms.append(f"{kf.name} mode={oct(mode)}")
+    if bad_perms:
+        return "FAIL", f"{len(key_files)} keys, {len(bad_perms)} with wrong perms: {', '.join(bad_perms[:3])}"
+    return "PASS", f"{len(key_files)} agent keys, all 0o600"
+
+
+def _check_audit_chain() -> tuple[str, str]:
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        return "WARN", f"{db_path} does not exist (no audit yet)"
+    try:
+        store = EnvelopeStore(str(db_path))
+        result = store.verify_audit_chain()
+    except Exception as e:
+        return "FAIL", f"chain verify raised {type(e).__name__}: {e}"
+    if not result["valid"]:
+        return "FAIL", (
+            f"chain INVALID at entry #{result['first_invalid_id']}: {result.get('error')}"
+        )
+    stats = store.get_stats()
+    sig_fails = stats["audit_trail"]["signature_failures"]
+    detail = f"{result['entries_checked']} entries verified"
+    if sig_fails:
+        return "FAIL", f"{detail}, but {sig_fails} signature failure(s)"
+    if result.get("gaps"):
+        return "WARN", f"{detail}, {len(result['gaps'])} gap(s) (possible deletions)"
+    return "PASS", detail
+
+
+def _check_approvals_dir() -> tuple[str, str]:
+    raw = os.environ.get("CARRYALL_APPROVALS_DIR", "~/slos/vaults/meta/approvals")
+    approvals = Path(raw).expanduser()
+    if not approvals.exists():
+        return "WARN", f"{approvals} does not exist (will be created on first request)"
+    if not os.access(approvals, os.W_OK):
+        return "FAIL", f"{approvals} is not writable"
+    pending = len(list(approvals.glob("*.yaml")))
+    return "PASS", f"{approvals} writable, {pending} record(s)"
+
+
+def _check_backend_config() -> tuple[str, str]:
+    cfg = os.environ.get("CARRYALL_SLOS_CONFIG")
+    if not cfg:
+        return "WARN", "CARRYALL_SLOS_CONFIG not set (will fall back to MemoryBackend)"
+    cfg_path = Path(cfg).expanduser()
+    if not cfg_path.exists():
+        return "FAIL", f"CARRYALL_SLOS_CONFIG points to missing file: {cfg_path}"
+    return "PASS", str(cfg_path)
+
+
+def _check_recent_activity() -> tuple[str, str]:
+    db_path = Path(get_db_path()).expanduser()
+    if not db_path.exists():
+        return "WARN", "no audit DB; nothing to count"
+    try:
+        store = EnvelopeStore(str(db_path))
+        stats = store.get_stats()
+    except Exception as e:
+        return "WARN", f"stats unavailable: {e}"
+    audit = stats["audit_trail"]
+    return "PASS", (
+        f"{audit['total_actions']} entries "
+        f"({audit['successful']} ok, {audit['blocked']} blocked)"
+    )
+
+
+@app.command()
+def doctor():
+    """Run a health check across keys, audit chain, approvals, and backend config.
+
+    Exits 1 if any check FAILs. WARN does not fail the run.
+    """
+    checks = [
+        ("Agent keys (dir + 0o600 perms)", _check_keys_dir),
+        ("Audit hash chain", _check_audit_chain),
+        ("Approvals dir", _check_approvals_dir),
+        ("Backend config (CARRYALL_SLOS_CONFIG)", _check_backend_config),
+        ("Audit activity", _check_recent_activity),
+    ]
+
+    table = Table(title="carryall doctor")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Detail", style="dim")
+
+    any_fail = False
+    for label, fn in checks:
+        try:
+            status, detail = fn()
+        except Exception as e:  # noqa: BLE001 — doctor must not raise
+            status, detail = "FAIL", f"check raised {type(e).__name__}: {e}"
+        if status == "PASS":
+            style = "green"
+        elif status == "WARN":
+            style = "yellow"
+        else:
+            style = "red"
+            any_fail = True
+        table.add_row(label, f"[{style}]{status}[/{style}]", detail)
+
+    console.print(table)
+    if any_fail:
+        raise typer.Exit(1)
+
+
+_TIER_LABELS = [
+    ("denied_agents", "1. Explicit deny (document)"),
+    ("requires_approval", "2. Requires approval (document)"),
+    ("allowed_agents", "3. Explicit allow (document)"),
+    ("envelope_scope", "4. Envelope scope match"),
+]
+
+
+@app.command()
+def explain(
+    credential: str = typer.Option(..., "--credential", "-c", help="Path to envelope JSON"),
+    action: str = typer.Option(..., "--action", "-a", help="Action (read, write, delete)"),
+    resource: str = typer.Option(..., "--resource", "-r", help="Resource URI"),
+    mock: bool = typer.Option(False, "--mock", help="Use mock backend"),
+):
+    """Dry-run policy evaluation and show which precedence tier fired.
+
+    Like ``carryall test`` but renders the 5-tier OPA precedence ladder
+    (deny > approval > allow > scope > default-deny) and surfaces the
+    structured deny payload (reason_class, suggested_scope, retry_hint)
+    that the MCP server returns to agents.
+    """
+    if not resource.startswith("slos://"):
+        console.print(f"[red]Error:[/red] Unknown resource URI scheme: {resource}")
+        raise typer.Exit(1)
+
+    cred_path = Path(credential).expanduser()
+    if not cred_path.exists():
+        console.print(f"[red]Error:[/red] Credential file not found: {credential}")
+        raise typer.Exit(1)
+
+    with open(cred_path) as f:
+        envelope_data = json.load(f)
+    envelope = AuthorityEnvelope(**envelope_data)
+
+    key_store = AgentKeyStore(get_keys_dir())
+    backend = SlosBackend(key_store=key_store)
+    result = backend.check_access(envelope, action, resource, mock=mock)
+    rule = result.metadata.get("rule")
+
+    table = Table(title=f"Precedence ladder for {action} {resource}")
+    table.add_column("Tier")
+    table.add_column("Fired", justify="center")
+    for tier_rule, label in _TIER_LABELS:
+        marker = "[bold green]✓[/bold green]" if rule == tier_rule else ""
+        table.add_row(label, marker)
+    final_tier = "5. Default deny" if rule is None and result.decision == Decision.DENY else "—"
+    table.add_row(final_tier, "[bold green]✓[/bold green]" if rule is None and result.decision == Decision.DENY else "")
+    console.print(table)
+
+    if result.decision == Decision.ALLOW:
+        console.print(f"\n[green]✓ ALLOW[/green]: {result.reason}")
+    elif result.decision == Decision.REQUIRE_APPROVAL:
+        console.print(f"\n[yellow]⚠ REQUIRE_APPROVAL[/yellow]: {result.reason}")
+    else:
+        from .enforce import classify_denial
+        classified = classify_denial(result.reason, result.metadata)
+        console.print(f"\n[red]✗ DENY[/red]: {result.reason}")
+        if classified["reason_class"]:
+            console.print(f"  reason_class:    {classified['reason_class']}")
+        if classified["suggested_scope"]:
+            console.print(f"  suggested_scope: {classified['suggested_scope']}")
+        if classified["retry_hint"]:
+            console.print(f"  retry_hint:      {classified['retry_hint']}")
+
+    if result.metadata:
+        console.print("\n[dim]Backend metadata:[/dim]")
+        for key, value in result.metadata.items():
+            console.print(f"  {key}: {value}")
+
+
+# =============================================================================
 # Keys commands
 # =============================================================================
 
