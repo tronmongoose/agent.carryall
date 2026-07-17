@@ -144,9 +144,15 @@ class SlosBackend:
         signing_key = self.key_store.load_signing_key(agent_id)
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Create canonical JSON of arguments (without _auth)
+        # Create canonical JSON of arguments (without _auth).
+        # ensure_ascii=False is load-bearing: the Rust runtime re-canonicalizes
+        # as raw UTF-8, so signing over \uXXXX-escaped JSON fails verification
+        # for ANY non-ASCII content (em-dash in an LLM brief was enough). This
+        # silently broke every signed write of LLM-generated prose for a month
+        # while ASCII test content passed (bjornswarm sl-t94n, 2026-07-16).
         args_without_auth = {k: v for k, v in arguments.items() if k != "_auth"}
-        args_json = json.dumps(args_without_auth, sort_keys=True, separators=(",", ":"))
+        args_json = json.dumps(args_without_auth, sort_keys=True,
+                               separators=(",", ":"), ensure_ascii=False)
 
         # Sign: agent_id || timestamp || json
         message = f"{agent_id}{timestamp}{args_json}".encode()

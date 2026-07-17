@@ -161,6 +161,29 @@ class TestRequestSigning:
         # Should not raise
         verify_key.verify(message, signature)
 
+    def test_signature_verifies_for_non_ascii_content(self, backend, key_store):
+        """Non-ASCII payloads must sign over raw-UTF-8 canonical JSON.
+
+        The Rust runtime re-canonicalizes as raw UTF-8; signing over
+        ensure_ascii-escaped JSON fails verification for any payload with
+        an em-dash / curly quote / emoji — which silently broke every
+        signed write of LLM-generated prose (bjornswarm sl-t94n incident,
+        2026-07-16). This reconstructs the message the way the runtime
+        does (ensure_ascii=False) and requires the signature to verify.
+        """
+        args = {"content": "brief — with “curly” quotes ✓", "domain": "personal"}
+        signed = backend._sign_request("test-agent", args)
+
+        auth = signed["_auth"]
+        args_without_auth = {k: v for k, v in signed.items() if k != "_auth"}
+        args_json = json.dumps(args_without_auth, sort_keys=True,
+                               separators=(",", ":"), ensure_ascii=False)
+        message = f"{auth['agent_id']}{auth['timestamp']}{args_json}".encode()
+
+        signing_key = key_store.load_signing_key("test-agent")
+        signature = base64.b64decode(auth["signature"])
+        signing_key.verify_key.verify(message, signature)  # must not raise
+
     def test_auth_excluded_from_signing_payload(self, backend):
         """The _auth field itself must not be included in the signed payload."""
         args = {"action": "read", "_auth": {"old": "data"}}
