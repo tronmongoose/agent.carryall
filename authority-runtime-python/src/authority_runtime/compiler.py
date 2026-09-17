@@ -21,6 +21,7 @@ from .types import (
     TokenMetrics,
 )
 from . import egress
+from .models import ModelPolicy
 from .envelope import create_envelope, narrow_authority
 
 
@@ -227,6 +228,9 @@ class OpenAICompiler(LLMCompiler):
         model: str = "gpt-4o-mini",
         api_key: Optional[str] = None,
     ):
+        # Always raises: openai is a forbidden provider. Kept only so the public name
+        # fails loudly instead of disappearing.
+        ModelPolicy.load().resolve("openai", model)
         super().__init__(model, api_key)
         self.client = OpenAI(api_key=api_key)
         self.default_model = model
@@ -365,15 +369,20 @@ class AnthropicCompiler(LLMCompiler):
 
     def __init__(
         self,
-        model: str = "claude-3-haiku-20240307",
+        model: str = "claude-haiku-4-5",
         api_key: Optional[str] = None,
     ):
+        ModelPolicy.load().resolve("anthropic", model)
         super().__init__(model, api_key)
         self.client = Anthropic(api_key=api_key)
         self.default_model = model
 
         # Anthropic pricing (as of Dec 2024)
         self.pricing = {
+            "claude-haiku-4-5": {
+                "input": 1.00 / 1_000_000,
+                "output": 5.00 / 1_000_000,
+            },
             "claude-3-haiku-20240307": {
                 "input": 0.25 / 1_000_000,
                 "output": 1.25 / 1_000_000,
@@ -435,7 +444,7 @@ class AnthropicCompiler(LLMCompiler):
         # Track metrics
         usage = response.usage
         if usage:
-            pricing = self.pricing.get(self.default_model, self.pricing["claude-3-haiku-20240307"])
+            pricing = self.pricing.get(self.default_model, self.pricing["claude-haiku-4-5"])
             cost = (usage.input_tokens * pricing["input"]) + (
                 usage.output_tokens * pricing["output"]
             )
@@ -585,6 +594,7 @@ class OllamaCompiler(LLMCompiler):
         model: str = "gemma4:26b",
         base_url: str = "http://localhost:11434",
     ):
+        ModelPolicy.load().resolve("ollama", model)
         super().__init__(model, api_key=None)
         self.base_url = base_url.rstrip("/")
         self.default_model = model

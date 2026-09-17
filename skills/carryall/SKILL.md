@@ -30,7 +30,7 @@ Parameters:
 - `available_scopes` (required): Scopes the agent may request from
 - `available_resources` (required): Resource patterns the agent can access
 - `ttl_seconds` (optional): Envelope lifetime (default: 300s)
-- `llm_provider` (optional): "openai" or "anthropic"
+- `llm_provider` (optional): "ollama" (default) or "anthropic". Any other value is refused with `reason_class: MODEL_POLICY`.
 
 ### carryall_check_access
 

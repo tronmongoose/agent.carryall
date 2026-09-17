@@ -27,15 +27,16 @@ class FinanceClassifier(SensitivityClassifier):
 
 # 2. Register your model tiers.
 registry = ModelRegistry()
-registry.add_tier("local",    model="gemma4:26b",       origin="Google")
-registry.add_tier("frontier", model="claude-sonnet-4",  origin="Anthropic")
+registry.add_tier("local",    model="gemma4:26b",      origin="Google",    provider="ollama")
+registry.add_tier("frontier", model="claude-sonnet-5", origin="Anthropic", provider="anthropic")
 
 # 3. Map sensitivity levels to tiers.
 registry.map_sensitivity("public",    "frontier")
 registry.map_sensitivity("sensitive", "local")
 
-# 4. Origin policy (optional but recommended).
-registry.assert_origins_allowed({"Anthropic", "Google", "Mistral", "Meta"})
+# 4. Model policy is not optional: Router() calls
+#    registry.assert_origins_allowed(ModelPolicy.load()) and raises on any tier
+#    whose (provider, model) is not allowlisted or whose origin label is wrong.
 
 # 5. Compose and route.
 router = Router(
@@ -66,12 +67,15 @@ deployments subclass.
 
 ### `Tier` and `ModelRegistry`
 
-A `Tier` is a `(name, model, origin)` triple plus arbitrary metadata.
+A `Tier` is `(name, model, origin, provider)` plus arbitrary metadata.
 The registry holds tiers and the sensitivity-level → tier mapping.
 
-`assert_origins_allowed(allowed)` is the boot-time enforcement hook for
-deployment origin policies (e.g., bjornswarm rule #13: US/EU origins only).
-It raises if any registered tier's origin is outside the allowlist.
+`assert_origins_allowed(policy)` checks every tier against
+`authority_runtime.models.ModelPolicy`: the exact `(provider, model)` must be
+allowlisted, and the tier's `origin` label must equal the origin the allowlist
+records for that model. `Router.__init__` calls it, and `Router.route`
+re-resolves the chosen tier on every decision, so a tier added after
+construction cannot bypass the policy.
 
 ### `Router` and `RouteDecision`
 

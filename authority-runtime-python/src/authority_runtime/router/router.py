@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from ..models import ModelPolicy, ModelPolicyError
 from .classifier import Sensitivity, SensitivityClassifier
 from .registry import ModelRegistry, Tier
 from .usage_logger import NullUsageLogger, UsageLogger
@@ -39,10 +40,13 @@ class Router:
         classifier: SensitivityClassifier,
         registry: ModelRegistry,
         logger: Optional[UsageLogger] = None,
+        policy: Optional[ModelPolicy] = None,
     ) -> None:
         self.classifier = classifier
         self.registry = registry
         self.logger = logger or NullUsageLogger()
+        self.policy = policy if policy is not None else ModelPolicy.load()
+        registry.assert_origins_allowed(self.policy)
 
     def route(
         self,
@@ -79,8 +83,16 @@ class Router:
                 reason=f"sensitivity={sensitivity.level}",
                 forced=False,
             )
+        self._enforce_policy(tier)
         self.logger.record(query, decision)
         return decision
+
+    def _enforce_policy(self, tier: Tier) -> None:
+        """Re-check the chosen tier; tiers can be added after construction."""
+        try:
+            self.policy.resolve(tier.provider, tier.model)
+        except ModelPolicyError as e:
+            raise RouteError(str(e)) from e
 
 
 __all__ = ["Router", "RouteDecision", "RouteError"]

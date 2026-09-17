@@ -23,16 +23,14 @@ import asyncio
 import http.client
 import ipaddress
 import json
-import os
 import socket
 import ssl
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
 from urllib.parse import urlsplit
 
 from .enforce import SystemAuditEntry
-from .storage import EnvelopeStore
+from .storage import EnvelopeStore, default_audit_store
 
 IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
 
@@ -271,13 +269,6 @@ def _send(dest: Destination, method: str, body: Optional[bytes],
         conn.close()
 
 
-def _default_store() -> EnvelopeStore:
-    """Open the audit store at $CARRYALL_DB (default ~/.carryall/authority.db)."""
-    path = Path(os.path.expanduser(os.environ.get("CARRYALL_DB", "~/.carryall/authority.db")))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return EnvelopeStore(str(path))
-
-
 def _safe_origin(url: str) -> str:
     """Best-effort scheme://host:port for audit records; never includes userinfo, path or query."""
     try:
@@ -312,7 +303,7 @@ def request(url: str, *, policy: EgressPolicy, purpose: str, method: str = "GET"
             timeout: float = 30.0, store: Optional[EnvelopeStore] = None) -> EgressResponse:
     """Validate, audit, and perform one HTTP request. Raises EgressDenied on any refusal."""
     try:
-        audit_store = store if store is not None else _default_store()
+        audit_store = store if store is not None else default_audit_store()
     except Exception as e:
         raise EgressDenied("audit_unavailable", f"{type(e).__name__}: {e}") from e
     hdrs = dict(headers or {})

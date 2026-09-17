@@ -1,9 +1,6 @@
 """Tests that every known outbound sink routes through authority_runtime.egress."""
 
 import ast
-import importlib.util
-import sys
-import types
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -12,7 +9,8 @@ import pytest
 from authority_runtime import egress
 from authority_runtime.storage import EnvelopeStore
 
-REPO = Path(__file__).resolve().parents[2]
+from .clawrouter_loader import REPO, load_clawrouter
+
 PKG = REPO / "authority-runtime-python" / "src" / "authority_runtime"
 
 SINKS = [
@@ -62,31 +60,6 @@ def test_egress_sinks_are_wired(path, qualname):
     assert called & {"request", "arequest"}, f"{qualname} makes no egress call"
 
 
-def _load_clawrouter(monkeypatch, tmp_path) -> types.ModuleType:
-    stubs = {
-        "get_account_balances": {"accounts": [{"name": "Checking", "balance": 1234.56}]},
-        "get_net_worth": {"assets": {"total": 1.0}, "liabilities": {"total": 0.0}},
-    }
-
-    class _Firefly(types.ModuleType):
-        def __getattr__(self, name: str) -> Any:
-            return lambda *a, **k: stubs.get(name, {})
-
-    firefly = _Firefly("firefly_tools")
-    common = types.ModuleType("common")
-    common.SLOS_DIR = str(tmp_path)  # type: ignore[attr-defined]
-    ctx = types.ModuleType("context_manager")
-    ctx.assemble_context_block = lambda *a, **k: ""  # type: ignore[attr-defined]
-    for mod in (firefly, common, ctx):
-        monkeypatch.setitem(sys.modules, mod.__name__, mod)
-    spec = importlib.util.spec_from_file_location(
-        "clawrouter_under_test", REPO / "mayor" / "clawrouter.py")
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _deny_rows(db: Path) -> List[Dict[str, Any]]:
     rows = EnvelopeStore(str(db)).get_audit_trail()
     return sorted((r for r in rows if r["action"].startswith("egress:")), key=lambda r: r["id"])
@@ -104,7 +77,7 @@ def test_clawrouter_refuses_link_local_ollama(monkeypatch, tmp_path):
     monkeypatch.setenv("CARRYALL_DB", str(db))
     monkeypatch.setenv("OLLAMA_URL", "http://169.254.169.254")
     _forbid_connect(monkeypatch)
-    router = _load_clawrouter(monkeypatch, tmp_path)
+    router = load_clawrouter(monkeypatch, tmp_path)
 
     with pytest.raises(egress.EgressDenied):
         router.call_local("what's my checking balance?")

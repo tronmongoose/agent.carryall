@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping
+
+if TYPE_CHECKING:
+    from ..models import ModelPolicy
 
 
 @dataclass(frozen=True)
@@ -14,6 +17,7 @@ class Tier:
     model: str
     origin: str  # e.g. "Anthropic", "Google", "Mistral", "Meta", "Microsoft"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    provider: str = ""  # "anthropic" or "ollama"; required for the tier to pass policy
 
 
 class ModelRegistry:
@@ -28,6 +32,7 @@ class ModelRegistry:
         name: str,
         model: str,
         origin: str,
+        provider: str = "",
         **metadata: Any,
     ) -> Tier:
         if not name or not isinstance(name, str):
@@ -38,7 +43,8 @@ class ModelRegistry:
             raise ValueError(f"Tier {name!r} model must be a non-empty string")
         if not origin or not isinstance(origin, str):
             raise ValueError(f"Tier {name!r} origin must be a non-empty string")
-        tier = Tier(name=name, model=model, origin=origin, metadata=dict(metadata))
+        tier = Tier(name=name, model=model, origin=origin, metadata=dict(metadata),
+                    provider=provider)
         self._tiers[name] = tier
         return tier
 
@@ -65,22 +71,19 @@ class ModelRegistry:
     def tiers_with_origin(self, origin: str) -> List[Tier]:
         return [t for t in self._tiers.values() if t.origin == origin]
 
-    def assert_origins_allowed(self, allowed: Iterable[str]) -> None:
-        """Raise ValueError if any registered tier's origin is not in `allowed`.
+    def assert_origins_allowed(self, policy: "ModelPolicy") -> None:
+        """Raise unless every tier's (provider, model) is allowlisted and its origin matches.
 
-        Use this to enforce a deployment's origin policy at boot time
-        (e.g., bjornswarm rule #13: US/EU only).
+        The origin label is caller-supplied text, so it is checked against the origin the
+        allowlist records for that exact model rather than trusted on its own.
+        Router calls this at construction; see Router.__init__.
         """
-        allowed_set = set(allowed)
-        bad = [
-            (t.name, t.origin)
-            for t in self._tiers.values()
-            if t.origin not in allowed_set
-        ]
-        if bad:
-            raise ValueError(
-                f"Tiers with disallowed origins: {bad}; allowed: {sorted(allowed_set)}"
-            )
-
+        for t in self._tiers.values():
+            resolved = policy.resolve(t.provider, t.model)
+            if t.origin != resolved.origin:
+                raise ValueError(
+                    f"Tier {t.name!r} claims origin {t.origin!r} but allowlist "
+                    f"{policy.version} records {resolved.origin!r} for {t.model!r}"
+                )
 
 __all__ = ["ModelRegistry", "Tier"]

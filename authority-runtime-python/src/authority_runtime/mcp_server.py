@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import egress
+from .models import ModelPolicy, ModelPolicyError, ResolvedModel, resolve_audited
 from .logging_config import configure_logging
 from .keys import AgentKeyStore
 from .storage import EnvelopeStore
@@ -59,9 +60,8 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 try:
-    from .compiler import OpenAICompiler, AnthropicCompiler, OllamaCompiler, compile_policy
+    from .compiler import AnthropicCompiler, OllamaCompiler, compile_policy
 except ImportError:
-    OpenAICompiler = None
     AnthropicCompiler = None
     OllamaCompiler = None
     compile_policy = None
@@ -545,7 +545,7 @@ class CarryallMCPServer:
                             },
                             "llm_provider": {
                                 "type": "string",
-                                "enum": ["openai", "anthropic", "ollama"],
+                                "enum": ["anthropic", "ollama"],
                                 "description": "LLM provider to use for policy compilation. Use 'ollama' for local-only compilation (required for sensitive/finance data). Default: ollama.",
                             },
                         },
@@ -880,6 +880,54 @@ class CarryallMCPServer:
             ]
         }
 
+    def _resolve_compiler_model(self, provider: Any, default: str,
+                                configured: Optional[str] = None) -> ResolvedModel:
+        """Resolve and audit the compiler model; refusals become MODEL_POLICY denials."""
+        try:
+            return resolve_audited(
+                ModelPolicy.load(), provider, purpose="compile_policy",
+                configured=configured, default=default, store=self.envelope_store,
+            )
+        except ModelPolicyError as e:
+            raise PermissionDenied(
+                f"DENIED: model policy refused {e.provider!r}/{e.model_id!r} ({e.reason}). "
+                "Operation blocked.",
+                reason_class="MODEL_POLICY",
+                metadata={"model_policy_reason": e.reason},
+            ) from e
+
+    def _select_compiler(self, llm_provider: Any) -> Any:
+        """Build the policy compiler for an explicit provider. There is no catch-all."""
+        if llm_provider == "ollama":
+            resolved = self._resolve_compiler_model(
+                "ollama", "gemma4:26b", os.environ.get("OLLAMA_COMPILER_MODEL"))
+            if OllamaCompiler is None:
+                raise PermissionDenied(
+                    "DENIED: Policy compilation unavailable — OllamaCompiler not loaded. "
+                    "Cannot bypass Carryall envelope system. Operation blocked.",
+                    reason_class="LLM_UNAVAILABLE",
+                    retry_hint="Install the ollama extras or switch llm_provider to a configured backend.",
+                )
+            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+            return OllamaCompiler(model=resolved.model_id, base_url=ollama_url)
+        if llm_provider == "anthropic":
+            resolved = self._resolve_compiler_model("anthropic", "claude-haiku-4-5")
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not api_key or AnthropicCompiler is None:
+                raise PermissionDenied(
+                    "DENIED: ANTHROPIC_API_KEY not available. "
+                    "Cannot compile policy without LLM. "
+                    "Use llm_provider='ollama' for local compilation, "
+                    "or set ANTHROPIC_API_KEY. Operation blocked.",
+                    reason_class="LLM_UNAVAILABLE",
+                    retry_hint="Retry with llm_provider='ollama' or export ANTHROPIC_API_KEY.",
+                )
+            return AnthropicCompiler(model=resolved.model_id, api_key=api_key)
+        # Unrecognized provider: audit the refusal, then refuse. Never pick a vendor.
+        self._resolve_compiler_model(llm_provider, "")
+        raise PermissionDenied(
+            f"DENIED: unsupported llm_provider {llm_provider!r}", reason_class="MODEL_POLICY")
+
     async def _tool_compile_policy(self, arguments: dict) -> dict:
         """
         Use LLM to compile natural language intent into a minimal permission envelope.
@@ -887,7 +935,6 @@ class CarryallMCPServer:
         This is the key differentiator - translates "I need to read Q4 finance report"
         into minimal scopes like "vault:finance:read" with cryptographic signing.
         """
-        import os
         import uuid
         from .envelope import create_envelope
 
@@ -913,42 +960,7 @@ class CarryallMCPServer:
             )
             llm_provider = "ollama"
 
-        # Select LLM compiler
-        if llm_provider == "ollama":
-            ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-            ollama_model = os.environ.get("OLLAMA_COMPILER_MODEL", "gemma4:26b")
-            if OllamaCompiler is None:
-                raise PermissionDenied(
-                    "DENIED: Policy compilation unavailable — OllamaCompiler not loaded. "
-                    "Cannot bypass Carryall envelope system. Operation blocked.",
-                    reason_class="LLM_UNAVAILABLE",
-                    retry_hint="Install the ollama extras or switch llm_provider to a configured backend.",
-                )
-            compiler = OllamaCompiler(model=ollama_model, base_url=ollama_url)
-        elif llm_provider == "anthropic":
-            api_key = os.environ.get("ANTHROPIC_API_KEY")
-            if not api_key:
-                raise PermissionDenied(
-                    "DENIED: ANTHROPIC_API_KEY not available. "
-                    "Cannot compile policy without LLM. "
-                    "Use llm_provider='ollama' for local compilation, "
-                    "or set ANTHROPIC_API_KEY. Operation blocked.",
-                    reason_class="LLM_UNAVAILABLE",
-                    retry_hint="Retry with llm_provider='ollama' or export ANTHROPIC_API_KEY.",
-                )
-            compiler = AnthropicCompiler(api_key=api_key)
-        else:
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise PermissionDenied(
-                    "DENIED: OPENAI_API_KEY not available. "
-                    "Cannot compile policy without LLM. "
-                    "Use llm_provider='ollama' for local compilation, "
-                    "or set OPENAI_API_KEY. Operation blocked.",
-                    reason_class="LLM_UNAVAILABLE",
-                    retry_hint="Retry with llm_provider='ollama' or export OPENAI_API_KEY.",
-                )
-            compiler = OpenAICompiler(api_key=api_key)
+        compiler = self._select_compiler(llm_provider)
 
         # Build minimal available skills based on scopes
         # The LLM will select which scopes are actually needed
@@ -1004,7 +1016,7 @@ class CarryallMCPServer:
         # Create default execution config for carryall
         from .types import ExecutionConfig
         default_execution = ExecutionConfig(
-            provider_config={"carryall": {"llm_provider": llm_provider or "openai"}}
+            provider_config={"carryall": {"llm_provider": llm_provider}}
         )
 
         envelope = create_envelope(

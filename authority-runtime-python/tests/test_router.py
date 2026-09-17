@@ -18,6 +18,7 @@ from authority_runtime.router import (
     Tier,
     UsageLogger,
 )
+from authority_runtime.models import ModelPolicy, ModelPolicyError
 
 
 # ── Sensitivity ───────────────────────────────────────────────
@@ -84,17 +85,21 @@ def test_registry_tiers_with_origin():
 
 def test_registry_assert_origins_allowed_passes():
     reg = ModelRegistry()
-    reg.add_tier("a", model="m", origin="Anthropic")
-    reg.add_tier("b", model="m", origin="Google")
-    reg.assert_origins_allowed({"Anthropic", "Google", "Mistral"})
+    reg.add_tier("a", model="claude-opus-5", origin="Anthropic", provider="anthropic")
+    reg.add_tier("b", model="gemma4:26b", origin="Google", provider="ollama")
+    reg.assert_origins_allowed(ModelPolicy.builtin())
 
 
 def test_registry_assert_origins_allowed_raises_on_violation():
     reg = ModelRegistry()
-    reg.add_tier("a", model="qwen2", origin="Alibaba")
-    reg.add_tier("b", model="claude", origin="Anthropic")
-    with pytest.raises(ValueError, match="disallowed"):
-        reg.assert_origins_allowed({"Anthropic", "Google"})
+    reg.add_tier("a", model="qwen2", origin="Alibaba", provider="ollama")
+    with pytest.raises(ModelPolicyError, match="banned_vendor"):
+        reg.assert_origins_allowed(ModelPolicy.builtin())
+
+    reg = ModelRegistry()
+    reg.add_tier("b", model="claude-opus-5", origin="Google", provider="anthropic")
+    with pytest.raises(ValueError, match="claims origin"):
+        reg.assert_origins_allowed(ModelPolicy.builtin())
 
 
 # ── Router ────────────────────────────────────────────────────
@@ -102,8 +107,8 @@ def test_registry_assert_origins_allowed_raises_on_violation():
 
 def _two_tier_setup() -> tuple[ModelRegistry, SensitivityClassifier]:
     reg = ModelRegistry()
-    reg.add_tier("local", model="gemma4:26b", origin="Google")
-    reg.add_tier("frontier", model="claude-sonnet-4", origin="Anthropic")
+    reg.add_tier("local", model="gemma4:26b", origin="Google", provider="ollama")
+    reg.add_tier("frontier", model="claude-sonnet-5", origin="Anthropic", provider="anthropic")
     reg.map_sensitivity("public", "frontier")
     reg.map_sensitivity("sensitive", "local")
 
@@ -122,7 +127,7 @@ def test_router_routes_public_to_frontier():
     decision = router.route("what's the weather?")
     assert isinstance(decision, RouteDecision)
     assert decision.tier == "frontier"
-    assert decision.model == "claude-sonnet-4"
+    assert decision.model == "claude-sonnet-5"
     assert decision.sensitivity.level == "public"
     assert decision.forced is False
     assert "sensitivity=public" in decision.reason
@@ -156,7 +161,7 @@ def test_router_force_tier_unknown_raises():
 
 def test_router_unmapped_sensitivity_raises():
     reg = ModelRegistry()
-    reg.add_tier("local", model="m", origin="Google")
+    reg.add_tier("local", model="gemma4:26b", origin="Google", provider="ollama")
     # No sensitivity mapping
 
     class _C(SensitivityClassifier):

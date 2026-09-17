@@ -37,6 +37,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from authority_runtime import egress
+from authority_runtime.models import ModelPolicy, ModelPolicyError, ResolvedModel, resolve_audited
 
 # Add usecases/ to path so we can import firefly_tools (also loads secrets)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,8 +47,11 @@ from context_manager import assemble_context_block
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-FRONTIER_MODEL = os.environ.get("CLAWROUTER_FRONTIER_MODEL", "claude-sonnet-4-20250514")
-LOCAL_MODEL = os.environ.get("CLAWROUTER_LOCAL_MODEL", "gemma4:26b")
+# Display values only. Every model actually sent is resolved at call time by _resolve_model.
+_FRONTIER_DEFAULT = "claude-sonnet-4-20250514"
+_LOCAL_DEFAULT = "gemma4:26b"
+FRONTIER_MODEL = os.environ.get("CLAWROUTER_FRONTIER_MODEL", _FRONTIER_DEFAULT)
+LOCAL_MODEL = os.environ.get("CLAWROUTER_LOCAL_MODEL", _LOCAL_DEFAULT)
 ROUTER_MODEL = os.environ.get("CLAWROUTER_ROUTER_MODEL", "gemma4:26b")
 
 USAGE_LOG = Path(SLOS_DIR) / "vaults" / "finance" / "router-usage.jsonl"
@@ -395,6 +399,16 @@ helpfully. Use the available tools to look up real data before answering — nev
 When giving advice, be specific and actionable. Format currency as $X,XXX.XX."""
 
 
+# ── Model Policy ──────────────────────────────────────────────
+
+
+def _resolve_model(provider: str, env_var: str, default: str, purpose: str,
+                   note: str | None = None) -> ResolvedModel:
+    """Resolve against the carryall allowlist and audit it. Raises ModelPolicyError."""
+    return resolve_audited(ModelPolicy.load(), provider, purpose=purpose,
+                           configured=os.environ.get(env_var), default=default, note=note)
+
+
 # ── Local Model (Ollama) ──────────────────────────────────────
 
 
@@ -437,6 +451,8 @@ def _summarize_recurring(data: dict) -> str:
 
 def call_local(query: str) -> dict:
     """Route to local Mistral model. Pre-fetches relevant data as compact text."""
+    model = _resolve_model("ollama", "CLAWROUTER_LOCAL_MODEL", _LOCAL_DEFAULT,
+                           "clawrouter_local").model_id
     start = time.time()
 
     # Pre-fetch relevant data in compact form (minimize prompt tokens)
@@ -480,7 +496,7 @@ Q: {query}
 A:"""
 
     payload = {
-        "model": LOCAL_MODEL,
+        "model": model,
         "prompt": prompt,
         "stream": False,
         "options": {"temperature": 0.2, "num_predict": 150},
@@ -502,7 +518,7 @@ A:"""
     return {
         "answer": response_text,
         "route": "local",
-        "model": LOCAL_MODEL,
+        "model": model,
         "tokens": tokens,
         "cost_usd": 0.0,
         "latency_ms": int(elapsed * 1000),
@@ -514,11 +530,13 @@ A:"""
 
 def call_frontier(query: str) -> dict:
     """Route to Claude with native tool use. Handles multi-turn tool call loop."""
+    model = _resolve_model("anthropic", "CLAWROUTER_FRONTIER_MODEL", _FRONTIER_DEFAULT,
+                           "clawrouter_frontier").model_id
     if not ANTHROPIC_API_KEY:
         return {
             "answer": "No ANTHROPIC_API_KEY configured. Add it to ~/.config/sovereign-finance/simplefin.env",
             "route": "frontier",
-            "model": FRONTIER_MODEL,
+            "model": model,
             "tokens": 0,
             "cost_usd": 0.0,
             "latency_ms": 0,
@@ -537,7 +555,7 @@ def call_frontier(query: str) -> dict:
     max_rounds = 5
     for _ in range(max_rounds):
         payload = {
-            "model": FRONTIER_MODEL,
+            "model": model,
             "max_tokens": 1024,
             "system": system,
             "tools": TOOLS,
@@ -610,7 +628,7 @@ def call_frontier(query: str) -> dict:
             return {
                 "answer": answer,
                 "route": "frontier",
-                "model": FRONTIER_MODEL,
+                "model": model,
                 "tokens": total_input_tokens + total_output_tokens,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
@@ -623,7 +641,7 @@ def call_frontier(query: str) -> dict:
     return {
         "answer": "(max tool rounds reached)",
         "route": "frontier",
-        "model": FRONTIER_MODEL,
+        "model": model,
         "tokens": total_input_tokens + total_output_tokens,
         "cost_usd": 0.0,
         "latency_ms": int(elapsed * 1000),
@@ -681,9 +699,26 @@ def route_query(query: str, force: str = None) -> dict:
                 "sensitivity": sensitivity,
             }
         elif ANTHROPIC_API_KEY:
+            # Escalation must name an allowlisted model and leave an audit record, or refuse.
+            try:
+                frontier = _resolve_model(
+                    "anthropic", "CLAWROUTER_FRONTIER_MODEL", _FRONTIER_DEFAULT,
+                    "clawrouter_escalation", note="ollama_unavailable")
+            except ModelPolicyError as e:
+                return {
+                    "answer": f"Ollama is not running and the frontier model was refused: {e}",
+                    "route": "refused",
+                    "model": "none",
+                    "tokens": 0,
+                    "cost_usd": 0.0,
+                    "latency_ms": 0,
+                    "classification": classification,
+                    "sensitivity": sensitivity,
+                }
             route = "frontier"
             classification["reasons"].append(
-                "WARNING: Ollama unavailable, falling back to frontier (non-sensitive query)"
+                f"ESCALATED: Ollama unavailable, frontier model {frontier.model_id} "
+                f"(policy {frontier.policy_version}, audited)"
             )
         else:
             return {

@@ -18,6 +18,7 @@ Commands:
     carryall audit                   Query audit log
     carryall audit --verify          Verify audit log integrity
     carryall mcp serve               Start MCP server for Clawdbot integration
+    carryall models list|check|backtest  Model allowlist inspection and replay
 """
 
 import json
@@ -37,6 +38,7 @@ from .compliance import ComplianceReport
 from .policy import PolicyEngine, PolicyValidationError
 from .types import AuthorityEnvelope
 from .backends.slos import SlosBackend, Decision
+from .cli_models import models_app
 
 # Initialize Typer app
 app = typer.Typer(
@@ -65,6 +67,7 @@ app.add_typer(compliance_app, name="compliance")
 app.add_typer(policy_app, name="policy")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(db_app, name="db")
+app.add_typer(models_app, name="models")
 
 
 def get_keys_dir() -> str:

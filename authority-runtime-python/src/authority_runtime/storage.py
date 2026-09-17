@@ -11,6 +11,7 @@ This provides:
 
 import hashlib
 import logging
+import os
 import shutil
 import sqlite3
 import json
@@ -968,3 +969,10 @@ class EnvelopeStore:
                     "signature_failures": signature_failures,
                 }
             }
+
+
+def default_audit_store() -> EnvelopeStore:
+    """Open the audit store at $CARRYALL_DB (default ~/.carryall/authority.db), creating its dir."""
+    path = Path(os.path.expanduser(os.environ.get("CARRYALL_DB", "~/.carryall/authority.db")))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return EnvelopeStore(str(path))

@@ -296,181 +296,34 @@ class TestPromptBuilding:
 # =============================================================================
 
 
-class TestOpenAICompilerScopeValidation:
-    """Test that the compiler rejects LLM responses with invalid scopes."""
+class TestOpenAICompilerRefused:
+    """OpenAI is a forbidden provider: the compiler cannot be constructed at all."""
 
-    @pytest.mark.asyncio
-    async def test_rejects_scopes_outside_parent(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """LLM requesting scopes not in available_scopes should be rejected."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_skill_id": "skill-vault-read",
-            "required_scopes": ["vault:finance:read", "vault:secret:admin"],  # invalid scope
-            "required_context_fields": ["intent"],
-            "reasoning": "Need finance and secret admin access for the report",
-            "confidence": 0.95,
-        })
-        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+    def test_construction_refused_before_client(self):
+        from authority_runtime.models import ModelPolicyError
 
         with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
+            with pytest.raises(ModelPolicyError, match="forbidden_provider"):
+                OpenAICompiler(api_key="test-key")
+            MockOpenAI.assert_not_called()
 
-            compiler = OpenAICompiler(api_key="test-key")
 
-            with pytest.raises(ValueError, match="invalid scopes"):
-                await compiler.select_skill(
-                    user_request="Read the finance report",
-                    current_step=1,
-                    parent_authority=sample_authority,
-                    available_context_fields=available_context_fields,
-                    available_skills=available_skills,
-                    available_scopes=available_scopes,
-                )
+def _anthropic_response(payload, input_tokens=100, output_tokens=50):
+    response = MagicMock()
+    response.content = [MagicMock()]
+    response.content[0].text = payload if isinstance(payload, str) else json.dumps(payload)
+    response.usage = MagicMock(input_tokens=input_tokens, output_tokens=output_tokens)
+    return response
 
-    @pytest.mark.asyncio
-    async def test_rejects_context_fields_outside_available(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """LLM requesting context fields not available should be rejected."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_skill_id": "skill-vault-read",
-            "required_scopes": ["vault:finance:read"],
-            "required_context_fields": ["intent", "secret_password"],  # invalid field
-            "reasoning": "Need intent and secret password for access",
-            "confidence": 0.9,
-        })
-        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
 
-        with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
+class TestAnthropicCompilerResponseValidation:
+    """Response validation cases formerly exercised against OpenAICompiler."""
 
-            compiler = OpenAICompiler(api_key="test-key")
-
-            with pytest.raises(ValueError, match="invalid context fields"):
-                await compiler.select_skill(
-                    user_request="test",
-                    current_step=1,
-                    parent_authority=sample_authority,
-                    available_context_fields=available_context_fields,
-                    available_skills=available_skills,
-                    available_scopes=available_scopes,
-                )
-
-    @pytest.mark.asyncio
-    async def test_rejects_unknown_skill(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """LLM selecting a skill that doesn't exist should be rejected."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_skill_id": "skill-nonexistent",
-            "required_scopes": ["vault:finance:read"],
-            "required_context_fields": ["intent"],
-            "reasoning": "Selected a nonexistent skill for this test case",
-            "confidence": 0.9,
-        })
-        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-
-        with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
-
-            compiler = OpenAICompiler(api_key="test-key")
-
-            with pytest.raises(ValueError, match="unknown skill"):
-                await compiler.select_skill(
-                    user_request="test",
-                    current_step=1,
-                    parent_authority=sample_authority,
-                    available_context_fields=available_context_fields,
-                    available_skills=available_skills,
-                    available_scopes=available_scopes,
-                )
-
-    @pytest.mark.asyncio
-    async def test_rejects_invalid_json_response(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """Invalid JSON from LLM should raise ValueError."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "not valid json at all"
-        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-
-        with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
-
-            compiler = OpenAICompiler(api_key="test-key")
-
-            with pytest.raises(ValueError, match="invalid response format"):
-                await compiler.select_skill(
-                    user_request="test",
-                    current_step=1,
-                    parent_authority=sample_authority,
-                    available_context_fields=available_context_fields,
-                    available_skills=available_skills,
-                    available_scopes=available_scopes,
-                )
-
-    @pytest.mark.asyncio
-    async def test_valid_response_returns_skill_selection(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """A valid LLM response should produce a SkillSelection."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_skill_id": "skill-vault-read",
-            "required_scopes": ["vault:finance:read"],
-            "required_context_fields": ["intent"],
-            "reasoning": "User wants to read finance data for Q4 reporting",
-            "confidence": 0.95,
-        })
-        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-
-        with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
-
-            compiler = OpenAICompiler(api_key="test-key")
-            selection = await compiler.select_skill(
-                user_request="Read the Q4 finance report",
-                current_step=1,
-                parent_authority=sample_authority,
-                available_context_fields=available_context_fields,
-                available_skills=available_skills,
-                available_scopes=available_scopes,
-            )
-
-            assert isinstance(selection, SkillSelection)
-            assert selection.selected_skill.id == "skill-vault-read"
-            assert selection.required_scopes == ["vault:finance:read"]
-            assert selection.confidence == 0.95
-
-    @pytest.mark.asyncio
-    async def test_metrics_tracked(self, available_skills, available_scopes, available_context_fields, sample_authority):
-        """Token metrics should be tracked after a successful call."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "selected_skill_id": "skill-vault-read",
-            "required_scopes": ["vault:finance:read"],
-            "required_context_fields": ["intent"],
-            "reasoning": "User wants finance data for the quarterly report",
-            "confidence": 0.9,
-        })
-        mock_response.usage = MagicMock(prompt_tokens=200, completion_tokens=80)
-
-        with patch("authority_runtime.compiler.OpenAI") as MockOpenAI:
-            mock_client = MagicMock()
-            mock_client.chat.completions.create.return_value = mock_response
-            MockOpenAI.return_value = mock_client
-
-            compiler = OpenAICompiler(api_key="test-key")
+    async def _select(self, response, fixtures):
+        available_skills, available_scopes, available_context_fields, sample_authority = fixtures
+        with patch("authority_runtime.compiler.Anthropic") as MockAnthropic:
+            MockAnthropic.return_value.messages.create.return_value = response
+            compiler = AnthropicCompiler(api_key="test-key")
             await compiler.select_skill(
                 user_request="test",
                 current_step=1,
@@ -479,12 +332,56 @@ class TestOpenAICompilerScopeValidation:
                 available_skills=available_skills,
                 available_scopes=available_scopes,
             )
+            return compiler
 
-            metrics = compiler.get_last_metrics()
-            assert metrics is not None
-            assert metrics.input_tokens == 200
-            assert metrics.output_tokens == 80
-            assert metrics.total_cost_usd > 0
+    @pytest.fixture
+    def fixtures(self, available_skills, available_scopes, available_context_fields, sample_authority):
+        return available_skills, available_scopes, available_context_fields, sample_authority
+
+    @pytest.mark.asyncio
+    async def test_rejects_context_fields_outside_available(self, fixtures):
+        response = _anthropic_response({
+            "selected_skill_id": "skill-vault-read",
+            "required_scopes": ["vault:finance:read"],
+            "required_context_fields": ["intent", "secret_password"],
+            "reasoning": "Need intent and secret password for access",
+            "confidence": 0.9,
+        })
+        with pytest.raises(ValueError, match="invalid context fields"):
+            await self._select(response, fixtures)
+
+    @pytest.mark.asyncio
+    async def test_rejects_unknown_skill(self, fixtures):
+        response = _anthropic_response({
+            "selected_skill_id": "skill-nonexistent",
+            "required_scopes": ["vault:finance:read"],
+            "required_context_fields": ["intent"],
+            "reasoning": "Selected a nonexistent skill for this test case",
+            "confidence": 0.9,
+        })
+        with pytest.raises(ValueError, match="unknown skill"):
+            await self._select(response, fixtures)
+
+    @pytest.mark.asyncio
+    async def test_rejects_invalid_json_response(self, fixtures):
+        with pytest.raises(ValueError, match="invalid response format"):
+            await self._select(_anthropic_response("not valid json at all"), fixtures)
+
+    @pytest.mark.asyncio
+    async def test_metrics_tracked(self, fixtures):
+        response = _anthropic_response({
+            "selected_skill_id": "skill-vault-read",
+            "required_scopes": ["vault:finance:read"],
+            "required_context_fields": ["intent"],
+            "reasoning": "User wants finance data for the quarterly report",
+            "confidence": 0.9,
+        }, input_tokens=200, output_tokens=80)
+        compiler = await self._select(response, fixtures)
+        metrics = compiler.get_last_metrics()
+        assert metrics is not None
+        assert metrics.input_tokens == 200
+        assert metrics.output_tokens == 80
+        assert metrics.total_cost_usd > 0
 
 
 # =============================================================================

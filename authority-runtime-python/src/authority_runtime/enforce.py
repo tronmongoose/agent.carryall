@@ -85,6 +85,7 @@ _REASON_CLASS_HINTS: Dict[str, str] = {
     "AUDIT_SCOPE_MISSING": "Re-compile an envelope that includes audit:read.",
     "CONSTRAINT_VIOLATION": "Narrow the request to satisfy the violated constraint, or escalate for approval.",
     "APPROVAL_REQUIRED": "Action requires human approval. Wait for the approval queue, do not retry blindly.",
+    "MODEL_POLICY": "Model or provider is not on the allowlist. Use an allowlisted model; do not retry with a different vendor.",
 }
 
 
