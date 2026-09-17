@@ -16,11 +16,11 @@ import sqlite3
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Generator
+from typing import List, Optional, Dict, Any, Generator, Union
 from pathlib import Path
 
 from .types import AuthorityEnvelope
-from .enforce import AuditEntry
+from .enforce import AuditEntry, SystemAuditEntry
 
 logger = logging.getLogger(__name__)
 
@@ -463,7 +463,7 @@ class EnvelopeStore:
         }, sort_keys=True)
         return hashlib.sha256(canonical.encode()).hexdigest()
 
-    def save_audit_entry(self, entry: AuditEntry) -> int:
+    def save_audit_entry(self, entry: Union[AuditEntry, SystemAuditEntry]) -> int:
         """
         Save an audit entry to the database with hash chain linking.
 

@@ -6,6 +6,7 @@ Tools wrapped with EnforcedTool will refuse to execute without valid envelopes.
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from functools import wraps
@@ -640,6 +641,43 @@ def export_audit_trail(
         }
 
     return result
+
+
+@dataclass(frozen=True)
+class SystemActor:
+    """Envelope stand-in for decisions the runtime makes without an agent envelope."""
+
+    envelope_id: str
+    agent_id: str
+    root_policy_id: str
+    decision_context: None = None
+
+
+class SystemAuditEntry:
+    """Audit record for a runtime-originated decision (e.g. egress). Never signed."""
+
+    def __init__(
+        self,
+        action: str,
+        subsystem: str,
+        result: str,
+        error: Optional[str] = None,
+        resource: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.timestamp = datetime.now(timezone.utc).isoformat()
+        self.action = action
+        self.envelope = SystemActor(
+            envelope_id=f"system:{subsystem}",
+            agent_id="carryall-runtime",
+            root_policy_id=f"system:{subsystem}",
+        )
+        self.result = result
+        self.error = error
+        self.resource = resource
+        self.metadata = metadata or {}
+        # signature_valid=False is truthful: no envelope signature exists to verify.
+        self.signature_valid = False
 
 
 def create_audit_entry(

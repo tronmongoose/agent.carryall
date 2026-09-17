@@ -27,8 +27,8 @@ import struct
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+from authority_runtime import egress
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from context_manager import DEFAULT_DB_PATH
@@ -65,18 +65,21 @@ def _get_embeddings_batch(texts: list[str]) -> list[list[float] | None]:
     """Get embedding vectors for a batch of texts. Returns list parallel to input."""
     truncated = [t[:8000] for t in texts]
     payload = json.dumps({"model": EMBED_MODEL, "input": truncated}).encode()
-    req = Request(f"{OLLAMA_URL}/api/embed", method="POST", data=payload)
-    req.add_header("Content-Type", "application/json")
-
     try:
-        with urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read())
+        resp = egress.request(
+            f"{OLLAMA_URL}/api/embed", policy=egress.LOCAL_SERVICE, purpose="ollama_embed",
+            method="POST", body=payload, headers={"Content-Type": "application/json"},
+            timeout=60,
+        )
+        if resp.status != 200:
+            raise OSError(f"HTTP {resp.status}")
+        data = resp.json()
         embeddings = data.get("embeddings", [])
         results = []
         for emb in embeddings:
             results.append(emb if len(emb) == EMBED_DIM else None)
         return results
-    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError) as e:
         log.warning("Batch embedding failed: %s", e)
     return [None] * len(texts)
 

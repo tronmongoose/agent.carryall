@@ -21,6 +21,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from authority_runtime import egress
+
 # Canonical SLOS root — import this instead of redefining in every file
 SLOS_DIR = os.path.expanduser(os.environ.get("SLOS_DIR", "~/slos"))
 
@@ -91,7 +93,6 @@ def call_ollama(system_prompt: str, user_prompt: str,
                 max_tokens: int = 3000, temperature: float = 0.4,
                 model: str | None = None) -> str | None:
     """Call Ollama's OpenAI-compatible chat endpoint. Returns text or None."""
-    url = f"{OLLAMA_URL}/v1/chat/completions"
     payload = json.dumps({
         "model": model or OLLAMA_MODEL,
         "messages": [
@@ -103,19 +104,23 @@ def call_ollama(system_prompt: str, user_prompt: str,
         "stream": False,
     }).encode("utf-8")
 
-    req = Request(url, data=payload,
-                  headers={"Content-Type": "application/json"}, method="POST")
     start = time.time()
     try:
-        with urlopen(req, timeout=180) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        resp = egress.request(
+            f"{OLLAMA_URL}/v1/chat/completions", policy=egress.LOCAL_SERVICE, purpose="ollama",
+            method="POST", body=payload, headers={"Content-Type": "application/json"},
+            timeout=180,
+        )
+        if resp.status != 200:
+            raise OSError(f"HTTP {resp.status}")
+        data = resp.json()
         elapsed = time.time() - start
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         content = re.sub(r"^```(?:json|markdown)?\s*", "", content)
         content = re.sub(r"\s*```$", "", content)
         print(f"  Ollama response in {elapsed:.1f}s")
         return content.strip()
-    except (HTTPError, URLError, TimeoutError) as e:
+    except OSError as e:
         print(f"  Ollama error: {e}")
         return None
 

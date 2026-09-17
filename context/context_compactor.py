@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 import argparse
+import json
 import logging
 import os
 import sys
@@ -27,6 +28,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+
+from authority_runtime import egress
 
 # Add project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -80,22 +83,26 @@ Summaries to condense:
 
 def _call_ollama(prompt: str, system: str = "") -> str | None:
     """Call Ollama for leaf summarization. Returns None on failure."""
+    body = json.dumps({
+        "model": OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": system or "You are a concise, factual summarizer."},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 1024,
+    }).encode("utf-8")
     try:
-        resp = requests.post(
-            f"{OLLAMA_URL}/v1/chat/completions",
-            json={
-                "model": OLLAMA_MODEL,
-                "messages": [
-                    {"role": "system", "content": system or "You are a concise, factual summarizer."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.2,
-                "max_tokens": 1024,
-            },
-            timeout=120,
+        resp = egress.request(
+            f"{OLLAMA_URL}/v1/chat/completions", policy=egress.LOCAL_SERVICE,
+            purpose="ollama_compactor", method="POST", body=body,
+            headers={"Content-Type": "application/json"}, timeout=120,
         )
-        resp.raise_for_status()
+        if resp.status != 200:
+            raise OSError(f"HTTP {resp.status}")
         return resp.json()["choices"][0]["message"]["content"]
+    except egress.EgressDenied:
+        raise
     except Exception as e:
         log.error("Ollama call failed: %s", e)
         return None

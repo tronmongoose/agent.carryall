@@ -25,6 +25,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from authority_runtime import egress
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 from common import load_env
 
@@ -189,28 +191,27 @@ def send_ntfy(text, title="Notification", topic="general", priority="default",
         print("  NOTIFY: ntfy not configured (missing NTFY_URL)")
         return False
 
-    url = f"{ntfy_url.rstrip('/')}/{topic}"
-    req = Request(url, data=text.encode("utf-8"), method="POST")
-    req.add_header("Title", title)
-    req.add_header("Priority", priority)
+    headers = {"Title": title, "Priority": priority}
     if markdown:
-        req.add_header("Markdown", "yes")
+        headers["Markdown"] = "yes"
     if tags:
-        req.add_header("Tags", tags)
+        headers["Tags"] = tags
     if click_url:
-        req.add_header("Click", click_url)
+        headers["Click"] = click_url
     if ntfy_token:
-        req.add_header("Authorization", f"Bearer {ntfy_token}")
+        headers["Authorization"] = f"Bearer {ntfy_token}"
 
     try:
-        with urlopen(req, timeout=15) as resp:
-            if resp.status == 200:
-                print(f"  Sent to ntfy topic '{topic}'")
-                return True
-            else:
-                print(f"  ntfy error: HTTP {resp.status}")
-                return False
-    except (HTTPError, URLError) as e:
+        resp = egress.request(
+            f"{ntfy_url.rstrip('/')}/{topic}", policy=egress.NOTIFY, purpose="ntfy",
+            method="POST", body=text.encode("utf-8"), headers=headers, timeout=15,
+        )
+        if resp.status == 200:
+            print(f"  Sent to ntfy topic '{topic}'")
+            return True
+        print(f"  ntfy error: HTTP {resp.status}")
+        return False
+    except OSError as e:
         print(f"  ntfy error: {e}")
         return False
 

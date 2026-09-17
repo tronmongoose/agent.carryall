@@ -38,6 +38,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
+from . import egress
 from .logging_config import configure_logging
 from .keys import AgentKeyStore
 from .storage import EnvelopeStore
@@ -290,25 +291,30 @@ class CarryallMCPServer:
             request_id, agent_id, action, resource, purpose,
         )
 
-        import aiohttp
         headers = {"Title": title, "Priority": "high", "Tags": "lock,carryall,approval"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         publish_url = f"{ntfy_url}/{topic}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    publish_url,
-                    data=body.encode("utf-8"),
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status >= 300:
-                        text = await resp.text()
-                        logger.warning(f"ntfy notification failed ({resp.status}): {text}")
-                        return False
-                    logger.info(f"Approval notification sent to ntfy topic {topic}")
-                    return True
+            resp = await egress.arequest(
+                publish_url,
+                policy=egress.NOTIFY,
+                purpose="approval_ntfy",
+                method="POST",
+                body=body.encode("utf-8"),
+                headers=headers,
+                timeout=10,
+                store=self.envelope_store,
+            )
+            if resp.status >= 300:
+                logger.warning(f"ntfy notification failed ({resp.status}): {resp.body[:200]!r}")
+                return False
+            logger.info(f"Approval notification sent to ntfy topic {topic}")
+            return True
+        except egress.EgressDenied as e:
+            # A redirected approval channel means prompts would silently vanish.
+            logger.error(f"ntfy approval channel refused by egress policy: {e}")
+            return False
         except Exception as e:
             logger.warning(f"Failed to send ntfy notification: {e}")
             return False

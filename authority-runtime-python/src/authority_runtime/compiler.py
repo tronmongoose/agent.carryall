@@ -20,6 +20,7 @@ from .types import (
     AuthorityEnvelope,
     TokenMetrics,
 )
+from . import egress
 from .envelope import create_envelope, narrow_authority
 
 
@@ -588,6 +589,22 @@ class OllamaCompiler(LLMCompiler):
         self.base_url = base_url.rstrip("/")
         self.default_model = model
 
+    async def _call_ollama_chat(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """POST to Ollama /api/chat through the loopback-only egress path."""
+        resp = await egress.arequest(
+            f"{self.base_url}/api/chat",
+            policy=egress.LOCAL_SERVICE,
+            purpose="ollama_compiler",
+            method="POST",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            timeout=60,
+        )
+        if resp.status != 200:
+            raise ValueError(f"Ollama returned HTTP {resp.status}: {resp.body[:200]!r}")
+        result: Dict[str, Any] = resp.json()
+        return result
+
     async def select_skill(
         self,
         user_request: str,
@@ -601,7 +618,6 @@ class OllamaCompiler(LLMCompiler):
         """Select skill using local Ollama model."""
 
         import time
-        import aiohttp
 
         start_time = time.time()
 
@@ -632,18 +648,7 @@ class OllamaCompiler(LLMCompiler):
             },
         }
 
-        url = f"{self.base_url}/api/chat"
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=60)
-            ) as resp:
-                if resp.status != 200:
-                    body = await resp.text()
-                    raise ValueError(
-                        f"Ollama returned HTTP {resp.status}: {body[:200]}"
-                    )
-                result = await resp.json()
+        result = await self._call_ollama_chat(payload)
 
         latency = int((time.time() - start_time) * 1000)
 

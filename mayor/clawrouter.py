@@ -36,6 +36,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from authority_runtime import egress
+
 # Add usecases/ to path so we can import firefly_tools (also loads secrets)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import firefly_tools
@@ -397,12 +399,12 @@ When giving advice, be specific and actionable. Format currency as $X,XXX.XX."""
 
 
 def ollama_available() -> bool:
-    """Check if Ollama is reachable."""
+    """Check if Ollama is reachable. EgressDenied propagates: a refused URL is misconfiguration, not an outage."""
     try:
-        req = Request(f"{OLLAMA_URL}/api/tags")
-        with urlopen(req, timeout=10) as resp:
-            return resp.status == 200
-    except (URLError, HTTPError, OSError):
+        resp = egress.request(f"{OLLAMA_URL}/api/tags", policy=egress.LOCAL_SERVICE,
+                              purpose="ollama", timeout=10)
+        return resp.status == 200
+    except OSError:
         return False
 
 
@@ -477,7 +479,6 @@ def call_local(query: str) -> dict:
 Q: {query}
 A:"""
 
-    url = f"{OLLAMA_URL}/api/generate"
     payload = {
         "model": LOCAL_MODEL,
         "prompt": prompt,
@@ -485,12 +486,14 @@ A:"""
         "options": {"temperature": 0.2, "num_predict": 150},
     }
 
-    body = json.dumps(payload).encode("utf-8")
-    req = Request(url, method="POST", data=body)
-    req.add_header("Content-Type", "application/json")
-
-    with urlopen(req, timeout=300) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
+    resp = egress.request(
+        f"{OLLAMA_URL}/api/generate", policy=egress.LOCAL_SERVICE, purpose="ollama_finance",
+        method="POST", body=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, timeout=300,
+    )
+    if resp.status != 200:
+        raise OSError(f"Ollama returned HTTP {resp.status}")
+    result = resp.json()
 
     elapsed = time.time() - start
     response_text = result.get("response", "").strip()
