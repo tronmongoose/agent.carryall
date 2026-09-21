@@ -10,11 +10,18 @@ Supported constraint keys:
   - denied_resources: list[str] — explicit deny list with glob matching (fnmatch)
   - max_records_per_request: int — limits returned record count (context must include "record_count")
   - write_requires_approval: bool — write actions return REQUIRE_APPROVAL instead of allowing
+  - unconstrained: bool — must be literally True; declares "no constraints apply" so that
+    an omitted or empty constraints dict can fail closed instead of skipping the gate
 """
 
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Any, Dict, List, Optional
+
+# An envelope must say something about its constraints. Bare {} is refused, so a
+# deliberately unconstrained envelope has to carry this key and is greppable in the
+# signed envelope and in the audit trail.
+UNCONSTRAINED = "unconstrained"
 
 
 @dataclass
@@ -39,15 +46,32 @@ def check_constraints(
     Returns a ConstraintResult. If any constraint is violated, allowed=False
     and violated contains human-readable descriptions of each violation.
 
-    Empty constraints dict always returns allowed=True (backward compat).
+    An empty constraints dict is refused: absence of constraints is not consent.
+    Pass {"unconstrained": True} to declare explicitly that none apply.
     """
     if not constraints:
-        return ConstraintResult(allowed=True)
+        return ConstraintResult(
+            allowed=False,
+            violated=[
+                "Envelope declares no constraints. An empty constraints dict is refused; "
+                f"set {{'{UNCONSTRAINED}': True}} to declare explicitly that none apply."
+            ],
+        )
+
+    unconstrained = constraints.get(UNCONSTRAINED, False)
+    if unconstrained is not True and len(constraints) == 1 and UNCONSTRAINED in constraints:
+        return ConstraintResult(
+            allowed=False,
+            violated=[f"Constraint '{UNCONSTRAINED}' must be literally True; got {unconstrained!r}"],
+        )
 
     ctx = context or {}
     violations: List[str] = []
     warnings: List[str] = []
     require_approval = False
+
+    if unconstrained is True:
+        warnings.append("Envelope is explicitly unconstrained")
 
     # Check each constraint
     if constraints.get("require_purpose"):

@@ -11,6 +11,7 @@ These tests validate the full system working together:
 
 import os
 import tempfile
+from authority_runtime.constraints import UNCONSTRAINED
 from authority_runtime import (
     create_envelope,
     generate_key_pair,
@@ -69,7 +70,8 @@ def test_full_workflow_with_persistence():
             ),
             authority=Authority(
                 scopes=["delete:users"],
-                resources=["user-*"]
+                resources=["user-*"],
+                constraints={UNCONSTRAINED: True},
             ),
             context=Context(included=["user_id"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
@@ -155,7 +157,8 @@ def test_delegation_chain_with_narrowing():
             ),
             authority=Authority(
                 scopes=["read:users", "write:users", "delete:users"],
-                resources=["*"]
+                resources=["*"],
+                constraints={UNCONSTRAINED: True},
             ),
             context=Context(included=["user_id", "email", "name"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
@@ -180,7 +183,8 @@ def test_delegation_chain_with_narrowing():
             ),
             authority=Authority(
                 scopes=["read:users"],  # Narrowed from 3 to 1 scope
-                resources=["*"]
+                resources=["*"],
+                constraints={UNCONSTRAINED: True},
             ),
             context=Context(included=["user_id"], excluded=["email", "name"]),
             execution=ExecutionConfig(provider_config={}),
@@ -261,7 +265,8 @@ def test_enforcement_security():
         ),
         authority=Authority(
             scopes=["admin:read"],  # Missing admin:write
-            resources=["*"]
+            resources=["*"],
+            constraints={UNCONSTRAINED: True},
         ),
         context=Context(included=[], excluded=[]),
         execution=ExecutionConfig(provider_config={}),
@@ -300,7 +305,8 @@ def test_enforcement_security():
         ),
         authority=Authority(
             scopes=["admin:write"],
-            resources=["*"]
+            resources=["*"],
+            constraints={UNCONSTRAINED: True},
         ),
         context=Context(included=[], excluded=[]),
         execution=ExecutionConfig(provider_config={}),
@@ -387,7 +393,9 @@ def test_multi_step_workflow_with_audit():
                 tool="Read user",
                 parameters=SkillParameters(allowed=["user_id"], constraints={})
             ),
-            authority=Authority(scopes=["read:users"], resources=["user-*"]),
+            authority=Authority(scopes=["read:users"], resources=["user-*"],
+    constraints={UNCONSTRAINED: True},
+),
             context=Context(included=["user_id"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
             private_key=private_key,
@@ -420,7 +428,9 @@ def test_multi_step_workflow_with_audit():
                 tool="Update profile",
                 parameters=SkillParameters(allowed=["user_id", "bio"], constraints={})
             ),
-            authority=Authority(scopes=["write:users"], resources=["user-*"]),
+            authority=Authority(scopes=["write:users"], resources=["user-*"],
+    constraints={UNCONSTRAINED: True},
+),
             context=Context(included=["user_id", "bio"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
             private_key=private_key,
@@ -454,7 +464,9 @@ def test_multi_step_workflow_with_audit():
                 tool="Send notification",
                 parameters=SkillParameters(allowed=["user_id", "message"], constraints={})
             ),
-            authority=Authority(scopes=["send:notifications"], resources=["user-*"]),
+            authority=Authority(scopes=["send:notifications"], resources=["user-*"],
+    constraints={UNCONSTRAINED: True},
+),
             context=Context(included=["user_id", "message"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
             private_key=private_key,

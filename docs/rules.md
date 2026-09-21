@@ -2,8 +2,9 @@
 
 `authority_runtime.rule_packs` — numbered hard-rule enforcement.
 
-A **rule pack** is a deployment-supplied YAML file declaring numbered runtime
-rules. Each rule names a predicate (registered separately by deployment code)
+Carryall ships a **builtin pack** of hard deny rules (see "Builtin rules"
+below). A **rule pack** is otherwise a deployment-supplied YAML file declaring
+numbered runtime rules. Each rule names a predicate (registered separately by deployment code)
 and one or more enforcement points (e.g., `pre-notify`, `pre-llm-call`).
 
 When a rule fires, the enforcement call raises `RuleViolation` with the rule's
@@ -124,3 +125,51 @@ Carryall ships the loader, registry, enforcer, decorator, and the
 This lets each deployment carry its own canonical rule list (bjornswarm's
 financial routing, no-Chinese-LLMs, no-PANW work product, etc.) without
 the contents leaking into the Carryall product.
+
+## Builtin rules
+
+`authority_runtime.rule_packs.builtin_pack()` returns the rules carryall ships.
+They take no configuration: each one either fires or it does not.
+
+| # | id | Enforced at | Denies |
+|---|----|-------------|--------|
+| 1 | `destructive-recursive-delete` | `pre-exec` | `rm -r` / `rm -rf` in any flag spelling |
+| 2 | `destructive-raw-disk-write` | `pre-exec` | `mkfs`, `dd of=/dev/…`, redirects into `/dev`, `diskutil erase`, `fdisk` |
+| 3 | `destructive-fork-bomb` | `pre-exec` | The classic shell fork bomb |
+| 4 | `privilege-escalation` | `pre-exec` | `sudo`, `doas`, `su -` |
+| 5 | `remote-script-pipe-to-shell` | `pre-exec` | `curl … \| sh`, `wget … \| bash` |
+| 6 | `git-force-push` | `pre-exec` | `git push --force` / `-f` (`--force-with-lease` is allowed) |
+| 7 | `credential-store-access` | `pre-file-read`, `pre-file-write` | `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gh`, `~/Library/Keychains` |
+| 8 | `env-file-access` | `pre-file-read`, `pre-file-write` | `.env` and `.env.<suffix>` |
+
+Rules 7 and 8 deny **reads as well as writes**: a credential that is read can
+be exfiltrated, so reading is the action worth stopping.
+
+### Enforcing them
+
+In process:
+
+```python
+from authority_runtime.rule_packs import builtin_pack, RuleViolation
+from authority_runtime.rule_packs.builtin import EXEC_POINT
+
+pack = builtin_pack()
+pack.enforce_point(EXEC_POINT, {"command": command})   # raises RuleViolation
+```
+
+From a shell or agent hook, gate on the exit code (0 permitted, 1 a rule fired,
+2 unusable input):
+
+```bash
+carryall rules check --command "$CMD" || exit 1
+carryall rules check --read "$PATH_TO_READ" || exit 1
+carryall rules list
+```
+
+### What this is not
+
+Matching is textual and conservative. It catches the literal forms named above;
+it cannot see through shell indirection (variables, `eval`, base64) and it is
+not a sandbox. A predicate whose context omits `command` or `path` counts as a
+violation, so a caller that forgets to pass the subject fails closed rather
+than silently passing.

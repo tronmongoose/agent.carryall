@@ -44,11 +44,17 @@ agents:
 
 - **scopes**: List of `domain:resource:action` permission strings. Supports wildcards (`vault:*:read`).
 - **resources**: URI patterns the agent can access. Wildcards supported.
-- **constraints**: Enforcement rules applied at runtime:
+- **constraints**: Enforcement rules applied at runtime. Required: an envelope
+  whose constraints are empty is refused at check time, because absence of
+  constraints is not consent. To declare that none apply, write
+  `unconstrained: true` explicitly; it is signed into the envelope and shows up
+  in the audit trail. An agent with no `constraints:` block is minted as
+  explicitly unconstrained and logs a warning.
   - `require_purpose`: Agent must state why it needs access
   - `denied_resources`: Explicit deny list (overrides scopes)
   - `max_records`: Limit on records returned per query
   - `require_approval`: Actions that need human sign-off
+  - `unconstrained`: Must be literally `true`; declares that no constraints apply
 
 ### Loading Policies
 

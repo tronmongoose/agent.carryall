@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from . import egress
+from .constraints import UNCONSTRAINED
 from .models import ModelPolicy, ModelPolicyError, ResolvedModel, resolve_audited
 from .logging_config import configure_logging
 from .keys import AgentKeyStore
@@ -543,6 +544,10 @@ class CarryallMCPServer:
                                 "type": "integer",
                                 "description": "Time-to-live for the envelope in seconds (default 300)",
                             },
+                            "constraints": {
+                                "type": "object",
+                                "description": "Enforced constraints for the envelope (require_purpose, denied_resources, max_records_per_request, write_requires_approval). Defaults to {\"unconstrained\": true}, which is recorded explicitly.",
+                            },
                             "llm_provider": {
                                 "type": "string",
                                 "enum": ["anthropic", "ollama"],
@@ -966,11 +971,18 @@ class CarryallMCPServer:
         # The LLM will select which scopes are actually needed
         available_skills = self._generate_skills_from_scopes(available_scopes)
 
+        # Constraints must be explicit: an empty dict is refused at check time.
+        constraints = arguments.get("constraints")
+        if constraints is None:
+            constraints = {UNCONSTRAINED: True}
+        if not isinstance(constraints, dict) or not constraints:
+            raise ValueError("constraints must be a non-empty object when provided")
+
         # Create a parent authority representing the agent's maximum permissions
         parent_authority = Authority(
             scopes=available_scopes,
             resources=available_resources,
-            constraints={},
+            constraints=constraints,
         )
 
         # Context fields available (for now, minimal set)
@@ -1004,7 +1016,7 @@ class CarryallMCPServer:
         narrowed_authority = Authority(
             scopes=selection.required_scopes,
             resources=available_resources,  # Keep resource access for now
-            constraints={},
+            constraints=parent_authority.constraints,  # Narrowing never drops constraints
         )
 
         narrowed_context = Context(

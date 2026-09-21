@@ -13,8 +13,9 @@ Predicate convention (matches authority_runtime.constraints): the predicate
 returns None if the action is permitted, or a string explaining the violation
 if it is not.
 
-Boundary: Carryall ships the loader, registry, enforcer, decorator, and the
-RuleViolation type. Deployments supply rules.yaml and predicate functions.
+Boundary: Carryall ships the loader, registry, enforcer, decorator, the
+RuleViolation type, and a builtin pack of hard deny rules (see builtin.py).
+Deployments supply additional rules.yaml files and predicate functions.
 """
 
 from .pack import (
@@ -29,6 +30,14 @@ from .registry import (
     register_predicate,
     default_registry,
 )
+from .builtin import (
+    BUILTIN_RULES,
+    EXEC_POINT,
+    READ_POINT,
+    WRITE_POINT,
+    builtin_pack,
+    builtin_predicates,
+)
 from .decorators import enforces
 
 __all__ = [
@@ -41,4 +50,10 @@ __all__ = [
     "register_predicate",
     "default_registry",
     "enforces",
+    "BUILTIN_RULES",
+    "EXEC_POINT",
+    "READ_POINT",
+    "WRITE_POINT",
+    "builtin_pack",
+    "builtin_predicates",
 ]

@@ -6,7 +6,7 @@ and integration with check_envelope().
 """
 
 import pytest
-from authority_runtime.constraints import check_constraints
+from authority_runtime.constraints import UNCONSTRAINED, check_constraints
 from authority_runtime.enforce import (
     check_envelope,
     ConstraintViolation,
@@ -26,14 +26,19 @@ from authority_runtime.types import (
 
 
 class TestEmptyConstraints:
-    def test_empty_dict_always_allowed(self):
-        result = check_constraints({}, "read")
-        assert result.allowed is True
-        assert result.violated == []
+    """An empty constraints dict fails closed; see also tests/test_fail_closed.py."""
 
-    def test_none_like_constraints(self):
+    def test_empty_dict_denies(self):
+        result = check_constraints({}, "read")
+        assert result.allowed is False
+        assert result.violated
+
+    def test_none_like_constraints_deny(self):
         result = check_constraints({}, "write", resource="slos://vaults/health/x")
-        assert result.allowed is True
+        assert result.allowed is False
+
+    def test_explicitly_unconstrained_allows(self):
+        assert check_constraints({UNCONSTRAINED: True}, "read").allowed is True
 
 
 class TestRequirePurpose:
@@ -257,7 +262,7 @@ class TestCheckEnvelopeConstraints:
             authority=Authority(
                 scopes=scopes,
                 resources=resources or ["slos://vaults/*"],
-                constraints=constraints or {},
+                constraints=constraints or {UNCONSTRAINED: True},
             ),
             context=Context(included=["purpose"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
@@ -265,9 +270,10 @@ class TestCheckEnvelopeConstraints:
             ttl_seconds=3600,
         )
 
-    def test_no_constraints_passes(self, keys):
+    def test_explicitly_unconstrained_passes(self, keys):
         private_key, public_key = keys
         envelope = self._make_envelope(private_key, ["vault:finance:read"])
+        assert envelope.authority.constraints == {UNCONSTRAINED: True}
         check_envelope(envelope, public_key, "vault:finance:read")
 
     def test_require_purpose_enforced(self, keys):
@@ -339,9 +345,30 @@ class TestCheckEnvelopeConstraints:
         with pytest.raises(ApprovalRequired):
             check_envelope(envelope, public_key, "vault:finance:write")
 
-    def test_backward_compat_empty_constraints(self, keys):
-        """Envelopes with empty constraints dict (the default) work exactly as before."""
+    def test_empty_constraints_envelope_is_refused(self, keys):
+        """An envelope signed with the bare {} default no longer sails through."""
         private_key, public_key = keys
-        envelope = self._make_envelope(private_key, ["vault:finance:read"])
+        envelope = create_envelope(
+            agent_id="test-agent",
+            provider="custom",
+            step_number=1,
+            root_policy_id="policy-test",
+            skill=Skill(
+                id="skill-test",
+                name="test-access",
+                tool="test-tool",
+                parameters=SkillParameters(allowed=["read"], constraints={}),
+            ),
+            authority=Authority(
+                scopes=["vault:finance:read"],
+                resources=["slos://vaults/*"],
+                constraints={},
+            ),
+            context=Context(included=["purpose"], excluded=[]),
+            execution=ExecutionConfig(provider_config={}),
+            private_key=private_key,
+            ttl_seconds=3600,
+        )
         assert envelope.authority.constraints == {}
-        check_envelope(envelope, public_key, "vault:finance:read")
+        with pytest.raises(ConstraintViolation, match="no constraints"):
+            check_envelope(envelope, public_key, "vault:finance:read")

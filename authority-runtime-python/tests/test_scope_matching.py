@@ -6,6 +6,7 @@ and integration with check_envelope().
 """
 
 import pytest
+from authority_runtime.constraints import UNCONSTRAINED
 from authority_runtime.enforce import _scope_matches, check_envelope, PermissionDenied
 from authority_runtime.envelope import create_envelope, generate_key_pair
 from authority_runtime.types import Skill, SkillParameters, Authority, Context, ExecutionConfig
@@ -81,6 +82,7 @@ class TestCheckEnvelopeWildcardScopes:
             authority=Authority(
                 scopes=scopes,
                 resources=resources or ["slos://vaults/*"],
+                constraints={UNCONSTRAINED: True},
             ),
             context=Context(included=["purpose"], excluded=[]),
             execution=ExecutionConfig(provider_config={}),

@@ -19,6 +19,7 @@ Commands:
     carryall audit --verify          Verify audit log integrity
     carryall mcp serve               Start MCP server for Clawdbot integration
     carryall models list|check|backtest  Model allowlist inspection and replay
+    carryall rules list|check        Hard-rule pack (destructive commands, credential paths)
 """
 
 import json
@@ -39,6 +40,7 @@ from .policy import PolicyEngine, PolicyValidationError
 from .types import AuthorityEnvelope
 from .backends.slos import SlosBackend, Decision
 from .cli_models import models_app
+from .cli_rules import rules_app
 
 # Initialize Typer app
 app = typer.Typer(
@@ -68,6 +70,7 @@ app.add_typer(policy_app, name="policy")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(db_app, name="db")
 app.add_typer(models_app, name="models")
+app.add_typer(rules_app, name="rules")
 
 
 def get_keys_dir() -> str:
@@ -160,6 +163,19 @@ def shell(
     shell_instance.run()
 
 
+# Dry-run verdict exit codes. 2 stays reserved for usage errors across the CLI.
+EXIT_ALLOW = 0
+EXIT_DENY = 1
+EXIT_REQUIRE_APPROVAL = 3
+
+
+def _verdict_exit(decision: Decision) -> None:
+    """Exit with the decision so a caller can gate on it instead of parsing output."""
+    if decision == Decision.ALLOW:
+        raise typer.Exit(EXIT_ALLOW)
+    raise typer.Exit(EXIT_DENY if decision == Decision.DENY else EXIT_REQUIRE_APPROVAL)
+
+
 @app.command()
 def test(
     credential: str = typer.Option(..., "--credential", "-c", help="Path to credential/envelope JSON"),
@@ -167,7 +183,10 @@ def test(
     resource: str = typer.Option(..., "--resource", "-r", help="Resource URI (e.g., slos://vaults/finance/doc-id)"),
     mock: bool = typer.Option(False, "--mock", help="Use mock backend (no real SLOS)"),
 ):
-    """Dry-run policy evaluation for a credential and resource."""
+    """Dry-run policy evaluation for a credential and resource.
+
+    Exit code carries the verdict: 0 allow, 1 deny, 3 require_approval.
+    """
     # Load credential
     cred_path = Path(credential).expanduser()
     if not cred_path.exists():
@@ -198,6 +217,8 @@ def test(
         console.print("\nMetadata:")
         for key, value in result.metadata.items():
             console.print(f"  {key}: {value}")
+
+        _verdict_exit(result.decision)
 
     else:
         console.print(f"[red]Error:[/red] Unknown resource URI scheme: {resource}")
@@ -348,6 +369,8 @@ def explain(
     (deny > approval > allow > scope > default-deny) and surfaces the
     structured deny payload (reason_class, suggested_scope, retry_hint)
     that the MCP server returns to agents.
+
+    Exit code carries the verdict: 0 allow, 1 deny, 3 require_approval.
     """
     if not resource.startswith("slos://"):
         console.print(f"[red]Error:[/red] Unknown resource URI scheme: {resource}")
@@ -396,6 +419,8 @@ def explain(
         console.print("\n[dim]Backend metadata:[/dim]")
         for key, value in result.metadata.items():
             console.print(f"  {key}: {value}")
+
+    _verdict_exit(result.decision)
 
 
 # =============================================================================

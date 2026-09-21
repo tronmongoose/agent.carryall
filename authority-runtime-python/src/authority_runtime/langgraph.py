@@ -57,6 +57,7 @@ from .types import (
     ExecutionConfig,
 )
 from .envelope import create_envelope
+from .constraints import UNCONSTRAINED
 from .compiler import OpenAICompiler, AnthropicCompiler
 from .enforce import EnforcedTool
 from .storage import EnvelopeStore
@@ -207,6 +208,7 @@ def create_authority_node(
                 authority=Authority(
                     scopes=policy_result.required_scopes,
                     resources=parent_envelope.authority.resources,
+                    constraints=parent_envelope.authority.constraints,  # Narrowing keeps them
                 ),
                 context=Context(
                     included=policy_result.required_context_fields,
@@ -348,6 +350,7 @@ def create_authority_graph(
         authority=Authority(
             scopes=initial_scopes,
             resources=["*"],
+            constraints={UNCONSTRAINED: True},  # Explicit: an empty dict is refused
         ),
         context=Context(
             included=initial_context_fields,

@@ -12,12 +12,14 @@ Usage:
     envelope = engine.create_envelope_for_agent("academic-advisor", private_key)
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List
 
 import yaml
 
+from .constraints import UNCONSTRAINED
 from .envelope import create_envelope
 from .types import (
     Authority,
@@ -27,6 +29,8 @@ from .types import (
     Skill,
     SkillParameters,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -191,6 +195,16 @@ class PolicyEngine:
         """Create a pre-configured envelope from policy definition."""
         agent = self.get_agent_policy(agent_id)
 
+        constraints = dict(agent.constraints)
+        if not constraints:
+            # An empty dict is refused at check time, so record the choice explicitly
+            # here rather than minting an envelope that can never be used.
+            logger.warning(
+                "Agent %r declares no constraints in policy; minting an explicitly "
+                "unconstrained envelope", agent_id
+            )
+            constraints = {UNCONSTRAINED: True}
+
         return create_envelope(
             agent_id=agent_id,
             provider=provider,
@@ -208,7 +222,7 @@ class PolicyEngine:
             authority=Authority(
                 scopes=agent.scopes,
                 resources=agent.resources,
-                constraints=agent.constraints,
+                constraints=constraints,
             ),
             context=Context(included=["purpose", "student_id"], excluded=["ssn", "dob"]),
             execution=ExecutionConfig(provider_config={}),

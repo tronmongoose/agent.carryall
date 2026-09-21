@@ -22,6 +22,7 @@ from .types import (
     NarrowingResult,
     DecisionContext,
 )
+from .constraints import UNCONSTRAINED
 from .validation import ValidationError
 
 
@@ -319,6 +320,7 @@ def create_simple_envelope(
     provider: str = "claude",
     ttl_seconds: int = 300,
     root_policy_id: Optional[str] = None,
+    constraints: Optional[Dict[str, Any]] = None,
 ) -> AuthorityEnvelope:
     """
     Create an envelope with sensible defaults for common use cases.
@@ -335,6 +337,8 @@ def create_simple_envelope(
         context_fields: Context fields to include (default: ["user_id", "session_id"])
         provider: LLM provider (default: "claude")
         ttl_seconds: Time-to-live in seconds (default: 300)
+        constraints: Enforced constraints (default: an explicit {"unconstrained": True},
+            since an empty constraints dict is refused at check time)
         root_policy_id: Policy ID (default: auto-generated from agent_id)
 
     Returns:
@@ -358,6 +362,8 @@ def create_simple_envelope(
         context_fields = ["user_id", "session_id"]
     if root_policy_id is None:
         root_policy_id = f"policy-{agent_id}"
+    if constraints is None:
+        constraints = {UNCONSTRAINED: True}
 
     # Create the envelope with full API
     return create_envelope(
@@ -377,7 +383,7 @@ def create_simple_envelope(
         authority=Authority(
             scopes=scopes,
             resources=resources,
-            constraints={},
+            constraints=constraints,
         ),
         context=Context(
             included=context_fields,

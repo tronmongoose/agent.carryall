@@ -210,22 +210,21 @@ def check_envelope(
             f"{envelope.authority.scopes}"
         )
 
-    # 4. Check constraints (if any)
-    if envelope.authority.constraints:
-        result = check_constraints(
-            constraints=envelope.authority.constraints,
-            action=action or _infer_action(required_scope),
-            resource=resource,
-            context=context,
+    # 4. Check constraints. Always runs: an empty dict is a refusal, not a skip.
+    result = check_constraints(
+        constraints=envelope.authority.constraints,
+        action=action or _infer_action(required_scope),
+        resource=resource,
+        context=context,
+    )
+    if result.require_approval:
+        raise ApprovalRequired(
+            f"Action requires human approval: {'; '.join(result.warnings)}"
         )
-        if result.require_approval:
-            raise ApprovalRequired(
-                f"Action requires human approval: {'; '.join(result.warnings)}"
-            )
-        if not result.allowed:
-            raise ConstraintViolation(
-                f"Constraint violation: {'; '.join(result.violated)}"
-            )
+    if not result.allowed:
+        raise ConstraintViolation(
+            f"Constraint violation: {'; '.join(result.violated)}"
+        )
 
     logger.info("Envelope check passed",
                 extra={"envelope_id": envelope.envelope_id,

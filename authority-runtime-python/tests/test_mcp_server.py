@@ -15,6 +15,7 @@ import os
 import tempfile
 import pytest
 
+from authority_runtime.constraints import UNCONSTRAINED
 from authority_runtime.mcp_server import CarryallMCPServer
 from authority_runtime.keys import AgentKeyStore
 from authority_runtime.storage import EnvelopeStore
@@ -92,6 +93,7 @@ def envelope_with_key(server):
         authority=Authority(
             scopes=["vault:finance:read", "vault:hr:read", "audit:read"],
             resources=["*"],
+            constraints={UNCONSTRAINED: True},
         ),
         context=Context(included=["intent"], excluded=[]),
         execution=ExecutionConfig(provider_config={}),
@@ -289,6 +291,7 @@ class TestAuditLog:
             authority=Authority(
                 scopes=["vault:finance:read"],  # No audit:read
                 resources=["*"],
+                constraints={UNCONSTRAINED: True},
             ),
             context=Context(included=[], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
@@ -427,7 +430,9 @@ class TestErrorResponses:
                 tool="read",
                 parameters=SkillParameters(allowed=[], constraints={}),
             ),
-            authority=Authority(scopes=["vault:finance:read"], resources=["*"]),
+            authority=Authority(scopes=["vault:finance:read"], resources=["*"],
+    constraints={UNCONSTRAINED: True},
+),
             context=Context(included=[], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
             private_key=private_key,
@@ -566,7 +571,9 @@ class TestStructuredDenyPayload:
                 tool="read",
                 parameters=SkillParameters(allowed=[], constraints={}),
             ),
-            authority=Authority(scopes=["vault:finance:read"], resources=["*"]),
+            authority=Authority(scopes=["vault:finance:read"], resources=["*"],
+    constraints={UNCONSTRAINED: True},
+),
             context=Context(included=[], excluded=[]),
             execution=ExecutionConfig(provider_config={}),
             private_key=private_key,
