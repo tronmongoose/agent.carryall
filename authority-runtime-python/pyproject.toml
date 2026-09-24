@@ -64,7 +64,9 @@ dev = [
     "pytest-cov>=4.0.0",
     "black>=23.0.0",
     "mypy>=1.0.0",
-    "ruff>=0.1.0",
+    # Pinned: CI and `make lint` must run the same rules. ruff 0.16 widened the
+    # default rule set, which turned a green main red without a code change.
+    "ruff==0.15.10",
     "types-PyYAML>=6.0.0",
 ]
 
@@ -82,6 +84,11 @@ target-version = ['py310']
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.ruff.lint]
+# Explicit, so a ruff upgrade cannot silently widen what CI enforces. This is
+# ruff's historical default (E4/E7/E9 + F) plus pycodestyle warnings.
+select = ["E4", "E7", "E9", "F", "W"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

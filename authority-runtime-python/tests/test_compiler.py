@@ -488,7 +488,7 @@ class TestRoleAwareCompiler:
             parameters=SkillParameters(allowed=["vault:finance:read"], constraints={}),
         )
 
-        selection = asyncio.get_event_loop().run_until_complete(
+        selection = asyncio.run(
             compiler.select_skill(
                 user_request="Read the finance report",
                 current_step=1,
@@ -549,7 +549,7 @@ class TestRoleAwareCompiler:
             parameters=SkillParameters(allowed=["vault:finance:read"], constraints={}),
         )
 
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             compiler.select_skill(
                 user_request="some ambiguous request",
                 current_step=1,
@@ -586,7 +586,7 @@ class TestRoleAwareCompiler:
 
         import asyncio
         with pytest.raises(ValueError, match="LLM fallback is disabled"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 compiler.select_skill(
                     user_request="unknown request",
                     current_step=1,
