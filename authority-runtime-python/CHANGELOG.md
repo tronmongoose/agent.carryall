@@ -2,6 +2,12 @@
 
 All notable changes to Authority Runtime are documented here.
 
+## [0.5.2] - 2026-10-06
+
+### Added
+
+- `supervisor.Observation.overdue`: the adapter names each source past its own freshness limit, and any entry flags `stale_heartbeat` unless the agent is paused. A row with several sources can no longer hide a dead one behind a fresh one.
+
 ## [0.5.1] - 2026-10-06
 
 ### Added

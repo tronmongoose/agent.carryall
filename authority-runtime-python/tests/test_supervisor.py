@@ -190,6 +190,42 @@ def test_no_expectation_never_stale():
     assert derive_flags(obs(), NOW, LIMITS) == ()
 
 
+def test_overdue_alone_flags_stale():
+    o = obs(overdue=("job nightly: past schedule",))
+    assert derive_flags(o, NOW, LIMITS) == ("stale_heartbeat",)
+
+
+def test_overdue_flags_stale_even_with_fresh_heartbeat():
+    o = obs(last_heartbeat=NOW, heartbeat_max_age=timedelta(minutes=10),
+            overdue=("stamp digest: missing",))
+    assert derive_flags(o, NOW, LIMITS) == ("stale_heartbeat",)
+
+
+def test_overdue_on_paused_agent_not_stale():
+    o = obs(paused=True, overdue=("job nightly: past schedule",))
+    assert derive_flags(o, NOW, LIMITS) == ()
+
+
+def test_empty_overdue_with_fresh_heartbeat_not_stale():
+    o = obs(last_heartbeat=NOW - timedelta(minutes=1),
+            heartbeat_max_age=timedelta(minutes=10), overdue=())
+    assert derive_flags(o, NOW, LIMITS) == ()
+
+
+@pytest.mark.parametrize("base", [
+    {},
+    {"last_heartbeat": NOW},
+    {"running": True},
+    {"last_outcome": "fail"},
+    {"next_scheduled_run": NOW + timedelta(hours=1)},
+    {"paused": True},
+])
+def test_overdue_does_not_change_state(base):
+    plain = obs(**base)
+    late = obs(overdue=("job nightly: past schedule",), **base)
+    assert derive_state(late) == derive_state(plain)
+
+
 # ── derive_flags: repeated_failure, approval_aging, over_budget ──
 
 
