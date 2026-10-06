@@ -2,6 +2,14 @@
 
 All notable changes to Authority Runtime are documented here.
 
+## [0.5.1] - 2026-10-06
+
+### Added
+
+- `authority_runtime.supervisor`: read-only fleet status with the agent as the primitive. Ships the `AgentStatus` contract, the rules that derive state and flags from observed signals, board ordering, and a `FleetAdapter` base for deployments. Stdlib-only and Python 3.9-compatible. See `docs/supervisor.md`.
+
+This is a 0.5 maintenance release for deployments still on Python 3.9. It carries only the supervisor package on top of 0.5.0. `main` keeps its 3.10 floor for the next minor release.
+
 ## [0.5.0] - 2026-05-10
 
 ### Added — bjornswarm-pattern ports
