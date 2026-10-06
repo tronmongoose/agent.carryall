@@ -70,8 +70,10 @@ The first match wins:
 
 ## Flags
 
-- `stale_heartbeat`: the agent has a freshness expectation and its last
-  heartbeat is older, or missing. Never set on a paused agent.
+- `stale_heartbeat`: the adapter listed a source in `Observation.overdue`,
+  or the agent has a freshness expectation and its newest heartbeat is older
+  or missing. Never set on a paused agent. Use `overdue` when an agent has
+  several sources: a fresh one must not hide a dead one.
 - `repeated_failure`: consecutive failures at or above the threshold (2).
 - `approval_aging`: any pending approval older than 24 hours.
 - `over_budget`: in the vocabulary, never derived. No per-agent budget

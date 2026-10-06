@@ -39,6 +39,9 @@ class Observation:
 
     running is None when no source says whether the agent is executing now.
     heartbeat_max_age is None when nothing expects the agent to check in.
+    overdue names each source the adapter found past its own freshness limit
+    (a job past its schedule, a stamp past its age). A row with several
+    sources can be overdue on one while its newest heartbeat is fresh.
     """
 
     agent_id: str
@@ -56,6 +59,7 @@ class Observation:
     next_scheduled_run: Optional[datetime] = None
     artifacts_recent: Tuple[ArtifactRef, ...] = ()
     spend_today: Spend = Spend()
+    overdue: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate adapter output at the trust boundary."""
@@ -108,14 +112,20 @@ def derive_state(obs: Observation) -> State:
     return "unknown"
 
 
+def _heartbeat_late(obs: Observation, now: datetime) -> bool:
+    """The newest heartbeat is missing or older than the row's own limit."""
+    if obs.heartbeat_max_age is None:
+        return False
+    hb = obs.last_heartbeat
+    return hb is None or now - hb > obs.heartbeat_max_age
+
+
 def derive_flags(obs: Observation, now: datetime, limits: Thresholds) -> Tuple[Flag, ...]:
     """Flags that need operator attention. over_budget has no source yet."""
     _require_aware("now", now)
     flags: List[Flag] = []
-    if not obs.paused and obs.heartbeat_max_age is not None:
-        hb = obs.last_heartbeat
-        if hb is None or now - hb > obs.heartbeat_max_age:
-            flags.append("stale_heartbeat")
+    if not obs.paused and (obs.overdue or _heartbeat_late(obs, now)):
+        flags.append("stale_heartbeat")
     if obs.consecutive_failures >= limits.repeated_failures:
         flags.append("repeated_failure")
     if any(now - a.requested_at > limits.approval_age for a in obs.pending_approvals):
