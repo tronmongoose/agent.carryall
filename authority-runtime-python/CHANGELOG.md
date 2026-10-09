@@ -6,6 +6,7 @@ All notable changes to Authority Runtime are documented here.
 
 ### Added
 
+- `supervisor.render`: read-only views over a `FleetReport`. `render_html` draws the fleet board and the inbox as one static page, `approvals_section` lists pending approvals oldest first, and `attention_lines` gives blocked, failed and flagged agents as chat lines. The views link to no action. Also released as 0.5.3 on the 0.5 line.
 - `supervisor.Observation.overdue`: the adapter names each source past its own freshness limit, and any entry flags `stale_heartbeat`. A row with several sources can no longer hide a dead one behind a fresh one. Also released as 0.5.2 on the 0.5 line.
 - `authority_runtime.supervisor`: read-only fleet status with the agent as the primitive. Ships the `AgentStatus` contract, the rules that derive state and flags from observed signals, board ordering, and a `FleetAdapter` base for deployments. Stdlib-only and Python 3.9-compatible. Also released as 0.5.1 on the 0.5 line. See `docs/supervisor.md`.
 

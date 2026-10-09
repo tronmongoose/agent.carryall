@@ -6,7 +6,7 @@ A supervisor is a projection, not a store. It reads each source of truth
 AgentStatus per agent. It never writes back to any of them.
 
 Boundary: Carryall ships the AgentStatus contract, the rules that derive
-state and flags from observed signals, board ordering, and JSON rendering.
+state and flags from observed signals, board ordering, JSON rendering, and the read-only HTML and chat views.
 Deployments supply:
   - a FleetAdapter that reads their own sources
   - the mapping from their jobs and identities to agents
@@ -43,6 +43,14 @@ from .derive import (
     to_status,
 )
 from .fleet import FleetAdapter, FleetReport, fleet_status, to_json
+from .render import (
+    InboxEntry,
+    InboxSection,
+    approvals_section,
+    attention_lines,
+    needs_attention,
+    render_html,
+)
 
 __all__ = [
     "FLAGS",
@@ -67,4 +75,10 @@ __all__ = [
     "FleetReport",
     "fleet_status",
     "to_json",
+    "InboxEntry",
+    "InboxSection",
+    "approvals_section",
+    "attention_lines",
+    "needs_attention",
+    "render_html",
 ]
