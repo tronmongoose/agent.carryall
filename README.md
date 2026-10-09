@@ -1,134 +1,148 @@
 # Carryall
 
-**IAM for AI agents.** Least-privilege authorization, cryptographic audit trails, and policy-governed vault access — so your agents can act autonomously without acting unsafely.
+**Authorization for AI agents.** Least-privilege scopes, signed short-lived envelopes, and a tamper-evident audit trail. Agents can act on their own without acting unsafely.
 
-## The Problem
+Carryall is a personal project. It runs the authorization layer for my own agent swarm on one machine. Feedback is welcome.
 
-AI agents need access to sensitive data — financial records, health information, customer databases, internal documents. Today, most agent systems solve this with API keys and trust: give the agent a token, hope it behaves.
+## The problem
 
-That doesn't scale. When agents cross domain boundaries, invoke tools autonomously, or act on untrusted input, you need:
+Agents need access to sensitive data: financial records, health information, internal documents. Most agent systems handle this with an API key and trust. Give the agent a token and hope it behaves.
 
-- **Least-privilege scoping** — agents get only the permissions they need, for only as long as they need them
-- **Cryptographic proof** — every action is signed, time-limited, and tamper-evident
-- **Policy compilation** — natural language intent translated into minimal-scope authorization envelopes via LLM
-- **Adversarial detection** — automatic scoring of threat patterns (the "lethal trifecta": finance operation + untrusted content + context injection)
+That breaks down once agents cross domain boundaries, call tools on their own, or act on untrusted input. You need:
 
-Carryall is the control plane that provides all of this.
+- **Least privilege.** An agent gets only the scopes it needs, only for as long as it needs them.
+- **Cryptographic proof.** Every action is signed, time-limited and tamper-evident.
+- **Policy compilation.** A plain-language intent becomes a minimal-scope envelope.
+- **Adversarial detection.** Threat patterns are scored, such as a finance operation that touches untrusted content.
 
-## How It Works
+## How it works
 
 ```
-Agent Intent: "Read Q4 budget for planning"
+Agent intent: "Read Q4 budget for planning"
          ↓
     compile_policy (LLM)
          ↓
-    Signed Envelope: vault:finance:read, TTL 300s, Ed25519
+    Signed envelope: vault:finance:read, TTL 300s, Ed25519
          ↓
-    OPA Policy Check → ALLOW / DENY / REQUIRE_APPROVAL
+    Policy check → ALLOW / DENY / REQUIRE_APPROVAL
          ↓
-    Vault Access (scoped, audited, hash-chained)
+    Vault access (scoped, audited, hash-chained)
 ```
 
-1. Agent declares intent in plain English
-2. `compile_policy` uses an LLM to select the minimal scopes needed
-3. A signed, time-limited envelope is issued
-4. Every action is checked against OPA policies, audited with SHA-256 hash chaining, and scored by Sentinel for adversarial patterns
+1. The agent declares its intent in plain English.
+2. `compile_policy` uses an LLM to pick the smallest set of scopes.
+3. Carryall issues a signed, time-limited envelope.
+4. Every action is checked against policy, written to a SHA-256 hash-chained audit log, and scored by Sentinel.
 
-## Architecture
+## Install
 
-```
-Channel Transport (Telegram, OpenClaw, Claude Code)
-         |
-    Mayor / ClawRouter         ← routes queries by complexity (local vs frontier)
-         |
-    Carryall Authorization     ← envelope signing, policy compilation, scope enforcement
-         |
-    SLOS Data Plane            ← vaults, documents, hash-chained audit trail
+```bash
+pip install authority-runtime
 ```
 
-Carryall is not a channel gateway. It sits between the transport layer and the data plane. It requires a channel transport upstream and a deployment config repo downstream.
+Published on PyPI as [`authority-runtime`](https://pypi.org/project/authority-runtime/). The current line needs Python 3.10 or later. The 0.5.x maintenance releases still support Python 3.9.
+
+## Quick start
+
+```bash
+# Generate a keypair for an agent
+python -m authority_runtime.cli keys generate finance-agent
+
+# MCP server over stdio, for Claude Code and other MCP clients
+python -m authority_runtime.cli mcp serve
+
+# MCP server over HTTP, for a chat gateway or other tools
+python -m authority_runtime.cli mcp serve --transport http --port 8765
+```
+
+## MCP tools
+
+Carryall exposes 8 tools over the [Model Context Protocol](https://modelcontextprotocol.io):
+
+| Tool | Purpose |
+|------|---------|
+| `compile_policy` | Turn an intent into a minimal-scope signed envelope |
+| `check_access` | Check whether an envelope permits an action |
+| `list_vaults` | List the data vaults |
+| `get_metadata` | Get a document's metadata and access policy |
+| `read_document` | Read a document (scoped, audited) |
+| `write_document` | Write a document (scoped, audited) |
+| `query_documents` | Search within one vault domain |
+| `audit_log` | Query the tamper-evident audit trail |
+
+## Security model
+
+### Envelopes
+
+Every agent action needs a signed **AuthorityEnvelope**:
+
+- Ed25519 signature from the agent's keypair
+- Short TTL, 300 seconds by default
+- Minimal scopes chosen by the policy compiler
+- A hash-chained audit entry (SHA-256, with gap detection)
+
+### Sentinel scoring
+
+Sentinel scores audit events for adversarial patterns. Scores add up, capped at 100:
+
+| Pattern | Score |
+|---------|-------|
+| Trifecta contamination (finance plus untrusted content) | +80 |
+| Invalid envelope signature | +50 |
+| Context ACL denial (cross-vault read or write) | +40 |
+| Cross-domain leak finding | +30 |
+
+A total of 70 or more recommends BLOCK. From 30 to 69 recommends FLAG. Below 30 passes.
+
+### Approval gates
+
+A pipeline stage can require a human decision before it continues. Approvals expire on their own, survive a restart, and land in the audit trail.
+
+## Fleet supervisor
+
+`authority_runtime.supervisor` gives a read-only view of an agent fleet, one row per agent. It reports what each agent is doing, what waits on a human, and what failed or went quiet. It never writes to the sources it reads. A deployment supplies an adapter for its own schedulers and logs. Carryall supplies the status contract, the state and flag rules, and an HTML board and inbox. See [docs/supervisor.md](docs/supervisor.md).
 
 ## Components
 
 | Component | Purpose |
 |-----------|---------|
-| **authority-runtime-python** | Core IAM library — Ed25519 signing, MCP server, envelope system, OPA policy engine |
-| **mayor** | Executive routing engine — complexity scoring, local vs frontier LLM selection |
-| **context** | DAG-backed context persistence — ingestion, compaction, embeddings, vault-scoped ACLs |
-| **sentinel** | Adversarial scoring — trifecta detection, spend velocity, cross-domain leak scoring |
-| **agents/argus** | Security scanner — data locality checks, credential exposure detection |
-| **policies** | OPA Rego templates for 7 vault domains |
+| **authority-runtime-python** | Core library: Ed25519 signing, envelopes, policy engine, MCP server, supervisor |
+| **mayor** | Routing engine: complexity scoring, local or frontier model selection |
+| **context** | Context persistence: ingestion, compaction, embeddings, vault-scoped ACLs |
+| **sentinel** | Adversarial scoring: trifecta detection, spend velocity, cross-domain leaks |
+| **agents/argus** | Security scanner: data locality and credential exposure checks |
+| **policies** | Rego policy templates for 7 vault domains |
 | **schemas** | Vault document metadata schema |
-| **lib** | Shared utilities — notification routing, pipeline verification |
+| **lib** | Shared utilities: notification routing, pipeline verification |
 
-## Quick Start
+## Where it sits
 
-```bash
-# Install the core library
-pip install ./authority-runtime-python/
+Carryall is not a chat gateway or a data store. It sits between the two:
 
-# Generate agent keys
-python -m authority_runtime.cli keys generate finance-agent
-
-# Start MCP server (for Claude Code / stdio integration)
-python -m authority_runtime.cli mcp serve
-
-# Start HTTP server (for Telegram gateway, external tools)
-python -m authority_runtime.cli mcp serve --transport http --port 8765
+```
+Channel (chat bot, Claude Code, other MCP clients)
+         |
+    Router            ← picks a local or frontier model
+         |
+    Carryall          ← envelopes, policy, scope enforcement
+         |
+    Data plane        ← vaults, documents, audit trail
 ```
 
-## MCP Tools
-
-Carryall exposes 8 tools via [Model Context Protocol](https://modelcontextprotocol.io):
-
-| Tool | Purpose |
-|------|---------|
-| `compile_policy` | Translate intent → minimal-scope signed envelope |
-| `check_access` | Check if an envelope permits a specific action |
-| `list_vaults` | List available data vaults |
-| `get_metadata` | Get document metadata and access policies |
-| `read_document` | Read document content (scoped, audited) |
-| `write_document` | Write document to vault (scoped, audited) |
-| `query_documents` | Search within a vault domain |
-| `audit_log` | Query the tamper-evident audit trail |
-
-## Security Model
-
-### Envelope System
-Every agent action requires a signed **AuthorityEnvelope**:
-- Ed25519 signature from agent keypair
-- Time-limited TTL (default 300 seconds)
-- Minimal scopes selected by LLM policy compiler
-- Hash-chained audit trail (SHA-256, gap detection, tamper-evident)
-
-### Sentinel Scoring
-Adversarial scoring engine detects threat patterns:
-
-| Pattern | Score | Action |
-|---------|-------|--------|
-| Trifecta contamination (finance + untrusted content) | +80 | BLOCK |
-| Invalid envelope signature | +50 | BLOCK |
-| ACL violation (cross-domain access) | +40 | FLAG |
-| Score >= 70 | — | Automatic BLOCK |
-| Score 40-69 | — | REQUIRE_APPROVAL |
-
-### Quality Gates
-Pipeline stages can require human approval before proceeding — Telegram inline keyboard with approve/deny, auto-expire, idempotent restart, full audit trail.
-
-## Deployment
-
-See [carryall-onboarding](https://github.com/tronmongoose/carryall-onboarding) for the customer deployment runbook.
+My own deployment uses a Telegram bot as the channel and local document vaults as the data plane. Any MCP client and any store with an adapter can fill those slots.
 
 ## Testing
 
 ```bash
-cd authority-runtime-python && python -m pytest  # 178 tests
+cd authority-runtime-python && python -m pytest
 ```
+
+779 tests on `main`.
 
 ## Versioning
 
-Semantic versioning. See `VERSION` and `CHANGELOG.md`.
+Semantic versioning. Release notes are in [authority-runtime-python/CHANGELOG.md](authority-runtime-python/CHANGELOG.md).
 
 ## License
 
-Business Source License 1.1. See `LICENSE`.
+Business Source License 1.1. See [LICENSE](LICENSE). This is a source-available license, not an open-source one.
