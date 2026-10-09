@@ -86,6 +86,23 @@ Thresholds are tunable through `Thresholds`.
 Blocked, failed, flagged, unknown, running, scheduled, idle. A flag lifts an
 agent above its state's rank. Ties sort by `agent_id`.
 
+## Views
+
+`render_html(report, inbox=sections)` returns one static page. Blocked, failed
+and flagged agents lead. Inbox sections follow, oldest item first. Quiet agents
+fold into a closed list. Sources the adapter could not read close the page.
+The page refreshes every 60 seconds.
+
+`approvals_section(report, how=...)` builds the approvals inbox from every
+agent's `pending_approvals`. `how` returns the text that says where an item is
+cleared today, such as a chat command. A deployment can add its own sections
+of `InboxEntry` rows for other items that wait on the operator.
+
+`attention_lines(report)` returns the blocked, failed and flagged agents as
+plain lines for a chat reply. With nothing loud it returns one line saying so.
+
+The views link to nothing that writes. Actions stay where they are today.
+
 ## Rules for adapters
 
 - Read only. A supervisor that needs write access to a source is out of scope.

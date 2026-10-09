@@ -2,6 +2,12 @@
 
 All notable changes to Authority Runtime are documented here.
 
+## [0.5.3] - 2026-10-09
+
+### Added
+
+- `supervisor.render`: read-only views over a `FleetReport`. `render_html` draws the fleet board and the inbox as one static page. Blocked, failed and flagged agents lead, and quiet agents fold away. `approvals_section` lists every pending approval oldest first. `attention_lines` gives the blocked, failed and flagged agents as plain lines for a chat reply. The deployment says how each item is cleared today, and the page only shows that text.
+
 ## [0.5.2] - 2026-10-06
 
 ### Added

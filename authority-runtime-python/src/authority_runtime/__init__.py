@@ -126,7 +126,7 @@ from .backends import (
 )
 from .backends.slos import parse_slos_uri
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 
 __all__ = [
     # Envelope core
