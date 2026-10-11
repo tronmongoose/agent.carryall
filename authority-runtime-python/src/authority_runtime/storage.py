@@ -766,8 +766,12 @@ class EnvelopeStore:
                 "entries_checked": int,
                 "first_invalid_id": int or None,
                 "error": str or None,
+                "failure": "gap" | "hash_mismatch" | "prev_hash_mismatch" | None,
                 "gaps": list of (expected_id, actual_id) tuples,
             }
+
+        A gap is a failure: rows missing from the sequence mean the log was
+        truncated, so ``valid`` is False whenever ``gaps`` is non-empty.
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -799,6 +803,7 @@ class EnvelopeStore:
                     "entries_checked": 0,
                     "first_invalid_id": None,
                     "error": None,
+                    "failure": None,
                     "gaps": [],
                 }
 
@@ -826,6 +831,7 @@ class EnvelopeStore:
                         "first_invalid_id": row_id,
                         "error": f"prev_hash mismatch at id={row_id}: "
                                  f"stored={stored_prev_hash}, expected={prev_expected_hash}",
+                        "failure": "prev_hash_mismatch",
                         "gaps": gaps,
                     }
 
@@ -852,17 +858,30 @@ class EnvelopeStore:
                         "first_invalid_id": row_id,
                         "error": f"entry_hash mismatch at id={row_id}: "
                                  f"stored={stored_hash}, computed={computed_hash}",
+                        "failure": "hash_mismatch",
                         "gaps": gaps,
                     }
 
                 prev_expected_hash = stored_hash
                 prev_id = row_id
 
+            if gaps:
+                return {
+                    "valid": False,
+                    "entries_checked": entries_checked,
+                    "first_invalid_id": gaps[0][1],
+                    "error": f"{len(gaps)} gap(s) in id sequence, first at "
+                             f"expected id={gaps[0][0]}, found id={gaps[0][1]}",
+                    "failure": "gap",
+                    "gaps": gaps,
+                }
+
             return {
-                "valid": True if not gaps else True,  # gaps are warnings, not invalidity
+                "valid": True,
                 "entries_checked": entries_checked,
                 "first_invalid_id": None,
                 "error": None,
+                "failure": None,
                 "gaps": gaps,
             }
 
@@ -874,9 +893,10 @@ class EnvelopeStore:
         """
         Move audit entries older than N days to a separate archive table.
 
-        The archive preserves all columns including hash chain data. Gaps
-        created in the main table's ID sequence will be detected by
-        verify_audit_chain as warnings.
+        The archive preserves all columns including hash chain data. The
+        main table's chain no longer verifies from id 1 afterwards: the first
+        surviving row links to an archived hash, and any ids removed from the
+        middle of the sequence are reported as gaps.
 
         Returns:
             {"archived_count": int, "cutoff_date": str}

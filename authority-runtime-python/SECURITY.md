@@ -98,9 +98,10 @@ Scope strings are a least-privilege aid, not an isolation mechanism. Concretely:
   database can rewrite every row and recompute every hash. The chain then
   verifies cleanly. Tamper evidence depends on the file being harder to write
   than to read, which on one machine under one user it is not.
-- **Truncation is a warning, not a failure.** `verify_audit_chain` reports
-  missing IDs in `gaps` and still returns `valid: True`. Deleting the tail of
-  the log is not reported as invalidity. Callers that care must inspect `gaps`.
+- **Only the tail can vanish unnoticed.** `verify_audit_chain` returns
+  `valid: False` with `failure: "gap"` when ids are missing from the sequence.
+  Deleting a contiguous run from the tail leaves no gap and no broken link, so
+  it is not reported. There is no tail anchor.
 - Runtime decisions (egress, model policy) are recorded as unsigned system
   entries with `signature_valid=False`. That flag is accurate. It means no
   envelope signature existed to verify, not that verification failed.
