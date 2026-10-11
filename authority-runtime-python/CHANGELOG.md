@@ -32,6 +32,26 @@ All notable changes to Authority Runtime are documented here.
 
 The `typecheck` CI job has been failing on `main` continuously since at least v0.1.0; this release does **not** clear that backlog. A baseline `mypy src/` reports 97 errors across 14 files in foundation modules (`storage.py`, `langgraph.py`, `cli.py`, `mcp_server.py`, `__init__.py`, etc.) — all pre-existing tech debt, not introduced by recent changes. The publish-gate added in this cycle requires `test` and `lint` to pass on a release commit, but **does not** require `typecheck`, so PyPI publishes are no longer blocked by the legacy mypy backlog while it gets worked down. The new port packages (`skill_loader`, `harness_audit`, `rule_packs`, `router`) are mypy-clean today; that bar should hold for new code.
 
+## [0.5.3] - 2026-10-09
+
+### Added
+
+- `supervisor.render`: read-only views over a `FleetReport`. `render_html` draws the fleet board and the inbox as one static page. Blocked, failed and flagged agents lead, and quiet agents fold away. `approvals_section` lists every pending approval oldest first. `attention_lines` gives the blocked, failed and flagged agents as plain lines for a chat reply. The deployment says how each item is cleared today, and the page only shows that text.
+
+## [0.5.2] - 2026-10-06
+
+### Added
+
+- `supervisor.Observation.overdue`: the adapter names each source past its own freshness limit, and any entry flags `stale_heartbeat` unless the agent is paused. A row with several sources can no longer hide a dead one behind a fresh one.
+
+## [0.5.1] - 2026-10-06
+
+### Added
+
+- `authority_runtime.supervisor`: read-only fleet status with the agent as the primitive. Ships the `AgentStatus` contract, the rules that derive state and flags from observed signals, board ordering, and a `FleetAdapter` base for deployments. Stdlib-only and Python 3.9-compatible. See `docs/supervisor.md`.
+
+This is a 0.5 maintenance release for deployments still on Python 3.9. It carries only the supervisor package on top of 0.5.0. `main` keeps its 3.10 floor for the next minor release.
+
 ## [0.5.0] - 2026-05-10
 
 ### Added — bjornswarm-pattern ports
