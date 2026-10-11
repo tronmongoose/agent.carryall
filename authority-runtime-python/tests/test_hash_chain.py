@@ -254,3 +254,55 @@ class TestBackfill:
         assert rows[0][1] is None      # First prev_hash is None
         assert rows[1][1] == rows[0][0]  # Chain links
         assert rows[2][1] == rows[1][0]
+
+
+class TestGapIsFailure:
+    def _save(self, store, envelope, pub, n):
+        for i in range(n):
+            entry = create_audit_entry(
+                action="read", envelope=envelope, public_key=pub,
+                result="success", resource=f"slos://vaults/test/doc{i}",
+            )
+            store.save_audit_entry(entry)
+
+    def test_gap_with_intact_links_is_invalid(self, store_and_envelope):
+        store, envelope, pub, db_path = store_and_envelope
+        self._save(store, envelope, pub, 2)
+
+        # Skip id 3 so row 4 links to row 2 with a consistent hash: the shape
+        # a deleted-then-recomputed row leaves behind.
+        conn = sqlite3.connect(db_path)
+        conn.execute("UPDATE sqlite_sequence SET seq = 3 WHERE name = 'audit_trail'")
+        conn.commit()
+        conn.close()
+        self._save(store, envelope, pub, 1)
+
+        result = store.verify_audit_chain()
+        assert result["gaps"] == [(3, 4)]
+        assert result["valid"] is False
+        assert result["failure"] == "gap"
+        assert result["first_invalid_id"] == 4
+        assert "gap" in result["error"]
+
+    def test_clean_chain_has_no_failure(self, store_and_envelope):
+        store, envelope, pub, _ = store_and_envelope
+        self._save(store, envelope, pub, 3)
+
+        result = store.verify_audit_chain()
+        assert result["valid"] is True
+        assert result["failure"] is None
+        assert result["gaps"] == []
+
+    def test_deleted_row_names_prev_hash_failure(self, store_and_envelope):
+        store, envelope, pub, db_path = store_and_envelope
+        self._save(store, envelope, pub, 4)
+
+        conn = sqlite3.connect(db_path)
+        conn.execute("DELETE FROM audit_trail WHERE id = 2")
+        conn.commit()
+        conn.close()
+
+        result = store.verify_audit_chain()
+        assert result["valid"] is False
+        assert result["failure"] == "prev_hash_mismatch"
+        assert result["gaps"] == [(2, 3)]

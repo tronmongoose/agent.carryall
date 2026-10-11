@@ -4,6 +4,10 @@ All notable changes to Authority Runtime are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- `EnvelopeStore.verify_audit_chain` returned `valid: True` when ids were missing from the audit sequence (the expression was `True if not gaps else True`). A gap now returns `valid: False`, `first_invalid_id` set to the first surviving id after the gap, and an `error` naming the gap. Every result carries a new `failure` field: `"gap"`, `"hash_mismatch"`, `"prev_hash_mismatch"` or `None`, so a caller can tell truncation from a rewritten row. `carryall doctor` reports a gap as FAIL instead of WARN. Tail deletion still leaves no evidence; `SECURITY.md` says so.
+
 ### Added
 
 - `supervisor.render`: read-only views over a `FleetReport`. `render_html` draws the fleet board and the inbox as one static page, `approvals_section` lists pending approvals oldest first, and `attention_lines` gives blocked, failed and flagged agents as chat lines. The views link to no action. Also released as 0.5.3 on the 0.5 line.
