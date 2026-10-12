@@ -4,6 +4,8 @@ All notable changes to Authority Runtime are documented here.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-11
+
 ### Fixed
 
 - `EnvelopeStore.verify_audit_chain` returned `valid: True` when ids were missing from the audit sequence (the expression was `True if not gaps else True`). A gap now returns `valid: False`, `first_invalid_id` set to the first surviving id after the gap, and an `error` naming the gap. Every result carries a new `failure` field: `"gap"`, `"hash_mismatch"`, `"prev_hash_mismatch"` or `None`, so a caller can tell truncation from a rewritten row. `carryall doctor` reports a gap as FAIL instead of WARN. Tail deletion still leaves no evidence; `SECURITY.md` says so.
