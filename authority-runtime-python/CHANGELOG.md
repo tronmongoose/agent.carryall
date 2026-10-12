@@ -4,6 +4,12 @@ All notable changes to Authority Runtime are documented here.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-12
+
+### Fixed
+
+- Importing `authority_runtime` no longer loads the OpenAI or Anthropic SDKs. The policy compiler resolves provider classes on first use, so a deployment that gates finance code on `sys.modules` can import the SLOS backend without tripping its guard. `authority_runtime.compiler.OpenAI` and `.Anthropic` still resolve (lazily) for test patching.
+
 ## [0.6.0] - 2026-10-11
 
 ### Fixed

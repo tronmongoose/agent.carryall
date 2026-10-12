@@ -9,8 +9,6 @@ import re
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 
-from openai import OpenAI
-from anthropic import Anthropic
 from pydantic import BaseModel, Field, ValidationError
 
 from .types import (
@@ -23,6 +21,22 @@ from .types import (
 from . import egress
 from .models import ModelPolicy
 from .envelope import create_envelope, narrow_authority
+
+
+_SDK_MODULES = {"OpenAI": "openai", "Anthropic": "anthropic"}
+
+
+def __getattr__(name: str):
+    """Resolve a provider SDK class on first use so importing this module loads no frontier SDK."""
+    module = _SDK_MODULES.get(name)
+    if module is None:
+        raise AttributeError(name)
+    return getattr(__import__(module), name)
+
+
+def _sdk(name: str):
+    """Honor a patched module attribute first, then import the SDK class lazily."""
+    return globals().get(name) or __getattr__(name)
 
 
 # Pydantic model for validating LLM responses
@@ -232,7 +246,7 @@ class OpenAICompiler(LLMCompiler):
         # fails loudly instead of disappearing.
         ModelPolicy.load().resolve("openai", model)
         super().__init__(model, api_key)
-        self.client = OpenAI(api_key=api_key)
+        self.client = _sdk("OpenAI")(api_key=api_key)
         self.default_model = model
 
         # OpenAI pricing (as of Dec 2024)
@@ -374,7 +388,7 @@ class AnthropicCompiler(LLMCompiler):
     ):
         ModelPolicy.load().resolve("anthropic", model)
         super().__init__(model, api_key)
-        self.client = Anthropic(api_key=api_key)
+        self.client = _sdk("Anthropic")(api_key=api_key)
         self.default_model = model
 
         # Anthropic pricing (as of Dec 2024)
